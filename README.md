@@ -65,20 +65,8 @@ Install from crates.io:
 cargo install snipexpand
 ```
 
-Without a Rust toolchain, download the latest prebuilt x86_64 binary:
-
-```bash
-mkdir -p ~/.local/bin
-curl -L https://github.com/silouanwright/snipexpand/releases/latest/download/snipexpand-x86_64-linux \
-  -o ~/.local/bin/snipexpand
-chmod +x ~/.local/bin/snipexpand
-```
-
-Each [GitHub Release](https://github.com/silouanwright/snipexpand/releases)
-also includes an aarch64 binary and SHA-256 checksums.
-
-Building from source requires `libxkbcommon-dev` and `libwayland-dev` on
-Debian or Ubuntu, or `libxkbcommon` and `wayland` on Arch Linux.
+Prebuilt x86_64 and aarch64 binaries are available from
+[GitHub Releases](https://github.com/silouanwright/snipexpand/releases).
 
 ## Set up
 
