@@ -80,18 +80,21 @@ This creates any missing starter files without overwriting your config, then
 starts the service and enables it for future sessions. Run `snipexpand doctor`
 if setup or expansion does not work.
 
-## Configure
+## Add your first snippet
 
-Add a simple expansion from the command line:
+Add an expansion from the command line:
 
 ```bash
 snipexpand add ';mail' 'user@example.com'
 ```
 
-For advanced matches, create or edit a YAML file below
+## Match files
+
+For more control, create or edit a YAML file below
 `~/.config/snipexpand/match/`:
 
 ```yaml
+# Match files reload when saved.
 global_vars:
   - name: today
     type: date
@@ -110,7 +113,7 @@ matches:
       Best regards,
       Your Name
 
-  # Put the cursor at $|$ after expansion
+  # $|$ marks the cursor position after expansion.
   - trigger: ";function"
     replace: |
       fn example() {
@@ -122,9 +125,9 @@ matches:
     replace: "{{today}}"
 ```
 
-`$|$` marks the cursor position. Match files reload when saved.
+## Settings
 
-Settings live in `~/.config/snipexpand/config.yml`:
+Global settings live in `~/.config/snipexpand/config.yml`:
 
 ```yaml
 # Choose when expansion happens.
