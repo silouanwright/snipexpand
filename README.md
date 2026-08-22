@@ -34,9 +34,10 @@ See the [compatibility matrix](docs/compatibility.md) for exact details.
 | Project | Strengths | Why choose SnipExpand instead |
 | --- | --- | --- |
 | [Espanso](https://espanso.org) | Mature, cross-platform automation with forms, scripts, and packages | First-class Omarchy and Hyprland support, built and tested around reliable Wayland input and injection where Espanso can be unreliable |
-| [Texpand](https://github.com/Ghishadow/texpand) | Lightweight Wayland expansion with YAML configuration and cursor placement | A native Rust implementation, persistent Wayland injection, strict validation, application exclusions, diagnostics, and service management |
-| [SKRT](https://github.com/aaaorg/skrt) | A small Rust foundation for Wayland text expansion | Espanso-style YAML, multiline matches, cursor placement, automatic reload, application exclusions, validation, and broader runtime tooling |
-| SnipExpand | Focused, config-based expansion for Omarchy and Hyprland | Persistent Wayland injection, a tested `uinput` fallback, fast replacement, and defaults tuned on the reference platform |
+| [Taurine](https://github.com/ereinaimer/taurine) | Cross-platform Rust automation with a TUI, regex, scripts, conversions, and optional AI | MIT licensing, plain YAML configuration, a narrower local-only scope, and first-class Omarchy defaults |
+| [AutoKey for Wayland](https://github.com/dlk3/autokey-wayland) | Mature GUI automation and Python scripting | Hyprland support, a native Rust daemon, and no Python or desktop-extension runtime; AutoKey's Wayland fork currently supports GNOME only |
+| [Texpand](https://github.com/andresousadotpt/texpand) | Lightweight Go-based Wayland expansion with YAML configuration and cursor placement | A native Rust implementation, persistent Wayland injection, strict validation, application exclusions, diagnostics, and service management |
+| [SRKT](https://github.com/aaaorg/srkt) | A small Rust foundation for Wayland text expansion | Espanso-style YAML, multiline matches, cursor placement, automatic reload, application exclusions, validation, and broader runtime tooling |
 
 ## Requirements
 
