@@ -289,20 +289,15 @@ impl Injector {
     }
 
     pub fn undo_text(&self, delete_count: usize, original: &str) -> Result<()> {
+        if self.can_type(original) {
+            self.backspace(delete_count);
+            self.type_text(original);
+            return self.flush();
+        }
+
+        self.backspace(delete_count);
         self.flush()?;
-        let mut command = std::process::Command::new("wtype");
-        for _ in 0..delete_count {
-            command.args(["-k", "BackSpace"]);
-        }
-        let status = command
-            .arg("--")
-            .arg(original)
-            .status()
-            .context("run wtype undo sequence")?;
-        if !status.success() {
-            anyhow::bail!("wtype undo sequence exited with {status}");
-        }
-        Ok(())
+        self.type_unicode(original)
     }
 
     pub fn flush(&self) -> Result<()> {

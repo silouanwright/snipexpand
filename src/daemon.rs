@@ -320,9 +320,6 @@ fn complete_pending_expansion(
 }
 
 fn complete_undo(injector: &Injector, expander: &mut Expander, previous: Undo) {
-    // Let the compositor consume the physical Backspace release before sending
-    // synthetic Backspaces. Otherwise held-key coalescing can discard them.
-    std::thread::sleep(std::time::Duration::from_millis(50));
     if let Err(error) = injector.undo_text(
         previous.replacement_len.saturating_sub(1),
         &previous.original,
