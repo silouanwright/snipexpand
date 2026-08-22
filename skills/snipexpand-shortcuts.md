@@ -186,14 +186,15 @@ Tell the user:
 - whether the running daemon reloaded, when relevant;
 - any limitation that changes the requested behavior.
 
-## Installing this skill
+## Using this as a discovered skill
 
-Place this file where the target coding assistant discovers personal skills.
-For Codex, a personal installation can be created with:
+SnipExpand installs a copy of this file at
+`~/.config/snipexpand/SKILL.md`. An AI agent can read that file directly. To
+make it a persistent personal Codex skill, run:
 
 ```bash
 mkdir -p ~/.codex/skills/snipexpand-shortcuts
-cp skills/snipexpand-shortcuts.md ~/.codex/skills/snipexpand-shortcuts/SKILL.md
+cp ~/.config/snipexpand/SKILL.md ~/.codex/skills/snipexpand-shortcuts/SKILL.md
 ```
 
 Other agents can use the same Markdown instructions from their own skill or

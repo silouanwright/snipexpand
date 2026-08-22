@@ -223,6 +223,11 @@ fn ensure_config() -> anyhow::Result<()> {
         )?;
     }
 
+    std::fs::write(
+        dir.join("SKILL.md"),
+        include_str!("../skills/snipexpand-shortcuts.md"),
+    )?;
+
     Ok(())
 }
 

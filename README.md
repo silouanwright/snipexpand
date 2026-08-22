@@ -80,6 +80,17 @@ This creates any missing starter files without overwriting your config, then
 starts the service and enables it for future sessions. Run `snipexpand doctor`
 if setup or expansion does not work.
 
+## AI agents
+
+SnipExpand installs an AI skill at `~/.config/snipexpand/SKILL.md`. Point your
+coding agent at it and describe what you want:
+
+> Read `~/.config/snipexpand/SKILL.md`, then set up my SnipExpand snippets.
+
+The skill teaches agents how to scaffold and edit match files, change settings,
+use the CLI, validate changes, and check the running service. You can manage
+your entire setup this way without learning the commands below.
+
 ## Add your first snippet
 
 Add an expansion from the command line:
