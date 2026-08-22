@@ -53,7 +53,9 @@ fn main() -> anyhow::Result<()> {
     let mut args = std::env::args().skip(1);
     let trigger = args.next().unwrap_or_else(|| ";snipexpand".to_string());
     let suffix = args.next().unwrap_or_default();
-    let undo = args.any(|arg| arg == "--undo");
+    let options: Vec<_> = args.collect();
+    let undo = options.iter().any(|arg| arg == "--undo");
+    let no_terminator = options.iter().any(|arg| arg == "--no-terminator");
     let mut keys = AttributeSet::<Key>::new();
     for code in 1u16..=248 {
         keys.insert(Key::new(code));
@@ -65,7 +67,7 @@ fn main() -> anyhow::Result<()> {
 
     // Allow SnipExpand's device reconciler and the compositor to discover the device.
     std::thread::sleep(Duration::from_millis(1500));
-    for character in trigger.chars().chain(std::iter::once(' ')) {
+    for character in trigger.chars().chain((!no_terminator).then_some(' ')) {
         emit_character(&mut device, character)?;
     }
     std::thread::sleep(Duration::from_millis(1500));

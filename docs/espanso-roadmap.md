@@ -27,7 +27,7 @@ SnipExpand should preserve four small boundaries inside one crate:
 | --- | --- | --- |
 | Active-app detection and exclusions | Prevent expansions in password managers and incompatible apps | Class, title, and executable regexes; diagnostic command |
 | Case propagation | High-frequency convenience with small implementation cost | Espanso-compatible `propagate_case` and casing styles |
-| Arbitrary Unicode fallback | Active XKB layouts cannot represent every useful character | Implemented with compositor-native `wtype`, without mutating the clipboard |
+| Arbitrary Unicode injection | Active XKB layouts cannot represent every useful character | Implemented with persistent modifier-free Wayland text keymaps and a `wtype` fallback |
 | Initialization | A good first run should not require reading source docs | Create minimal config and examples without overwriting files |
 | Runtime diagnostics | Wayland failures otherwise look mysterious | Implemented as `snipexpand doctor`, alongside `snipexpand detect` |
 | Backspace undo | Correcting an accidental expansion should be frictionless | Implemented for the immediately preceding plain, single-line expansion |

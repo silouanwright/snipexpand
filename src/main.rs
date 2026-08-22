@@ -100,6 +100,7 @@ fn handle_cmd(cmd: Cmd) -> anyhow::Result<()> {
             if cfg.legacy_loaded {
                 println!("Legacy expansions.toml is active; YAML matches are also supported.");
             }
+            print_config_warnings(&cfg);
         }
 
         Cmd::Doctor => doctor(),
@@ -148,6 +149,7 @@ fn handle_cmd(cmd: Cmd) -> anyhow::Result<()> {
                 println!("SnipExpand daemon is running");
                 println!("version: {}", status.version);
                 println!("pid: {}", status.pid);
+                println!("injection backend: {}", status.injection_backend);
                 println!(
                     "matches: {} group(s), {} trigger(s), {} file(s)",
                     status.match_groups, status.triggers, status.files
@@ -170,6 +172,18 @@ fn handle_cmd(cmd: Cmd) -> anyhow::Result<()> {
     Ok(())
 }
 
+fn print_config_warnings(config: &config::Config) {
+    for warning in config.unreachable_triggers() {
+        println!(
+            "WARNING: trigger '{}' in {} is unreachable in immediate mode because '{}' in {} expands first",
+            warning.trigger,
+            warning.source.display(),
+            warning.blocking_trigger,
+            warning.blocking_source.display()
+        );
+    }
+}
+
 fn init_config() -> anyhow::Result<()> {
     let dir = config::Config::dir();
     let match_dir = config::Config::match_dir();
@@ -178,7 +192,7 @@ fn init_config() -> anyhow::Result<()> {
     let matches = match_dir.join("base.yml");
     write_new(
         &settings,
-        "trigger_mode: space\nterminators: [space]\ninjection_delay_ms: 2\ninjection_settle_ms: 10\n",
+        "trigger_mode: space\nterminators: [space]\ninjection_backend: auto\ninjection_delay_ms: 1\nwayland_injection_delay_ms: 0\nuinput_injection_delay_ms: 1\ninjection_settle_ms: 10\n",
     )?;
     write_new(
         &matches,

@@ -2,6 +2,8 @@ use anyhow::{Context, Result};
 use evdev::{uinput::VirtualDeviceBuilder, AttributeSet, EventType, InputEvent, Key};
 use std::collections::HashMap;
 use std::io::Read;
+use std::io::Write;
+use std::os::fd::AsFd;
 use std::os::fd::IntoRawFd;
 use std::os::unix::io::FromRawFd;
 use std::sync::mpsc;
@@ -14,7 +16,13 @@ use wayland_client::{
     protocol::{wl_keyboard, wl_registry, wl_seat},
     Connection, Dispatch, QueueHandle,
 };
+use wayland_protocols_misc::zwp_virtual_keyboard_v1::client::{
+    zwp_virtual_keyboard_manager_v1::ZwpVirtualKeyboardManagerV1,
+    zwp_virtual_keyboard_v1::ZwpVirtualKeyboardV1,
+};
 use xkbcommon::xkb;
+
+use crate::config::InjectionBackend;
 
 // ---------------------------------------------------------------------------
 // Public API
@@ -32,6 +40,11 @@ pub struct KeymapLookup {
     table: HashMap<char, KeyInfo>,
     /// Reverse lookup: (evdev_code, xkb_level) → char, for decoding physical keypresses.
     input_table: HashMap<(u32, u32), char>,
+}
+
+struct KeymapData {
+    lookup: KeymapLookup,
+    text: String,
 }
 
 impl KeymapLookup {
@@ -53,19 +66,24 @@ impl KeymapLookup {
         Self::build_from_xkb(&keymap)
     }
 
-    /// Fallback: load the system default keymap via xkbcommon (no Wayland needed).
-    pub fn build_default() -> Self {
+    fn build_default_data() -> KeymapData {
         let ctx = xkb::Context::new(xkb::CONTEXT_NO_FLAGS);
         if let Some(keymap) =
             xkb::Keymap::new_from_names(&ctx, "", "", "", "", None, xkb::KEYMAP_COMPILE_NO_FLAGS)
         {
             tracing::info!("Loaded system default XKB keymap");
-            Self::build_from_xkb(&keymap)
+            KeymapData {
+                lookup: Self::build_from_xkb(&keymap),
+                text: keymap.get_as_string(xkb::KEYMAP_FORMAT_TEXT_V1),
+            }
         } else {
             tracing::error!("Failed to load default system keymap");
-            Self {
-                table: HashMap::new(),
-                input_table: HashMap::new(),
+            KeymapData {
+                lookup: Self {
+                    table: HashMap::new(),
+                    input_table: HashMap::new(),
+                },
+                text: String::new(),
             }
         }
     }
@@ -129,7 +147,14 @@ fn keysym_to_char(keysym: xkb::Keysym) -> Option<char> {
 
 #[derive(Debug)]
 enum InjectionCmd {
-    Key { code: u16, value: i32 },
+    Key {
+        code: u16,
+        value: i32,
+    },
+    Text {
+        text: String,
+        done: mpsc::Sender<std::result::Result<(), String>>,
+    },
     Flush(mpsc::Sender<()>),
 }
 
@@ -142,17 +167,24 @@ pub struct Injector {
     keymap: KeymapLookup,
     delay_ms: Arc<AtomicU64>,
     settle_ms: AtomicU64,
+    backend: &'static str,
 }
 
 impl Injector {
-    pub fn spawn(delay_ms: u64, settle_ms: u64) -> Result<Self> {
-        let (keymap_tx, keymap_rx) = mpsc::channel::<KeymapLookup>();
+    pub fn spawn(
+        backend: InjectionBackend,
+        delay_ms: u64,
+        wayland_delay_ms: Option<u64>,
+        uinput_delay_ms: Option<u64>,
+        settle_ms: u64,
+        wayland_text_chars: String,
+    ) -> Result<Self> {
+        let (keymap_tx, keymap_rx) = mpsc::channel::<KeymapData>();
         let (cmd_tx, cmd_rx) = mpsc::sync_channel::<InjectionCmd>(512);
 
         // Thread 1: get XKB keymap from Wayland compositor, then exit.
         // Falls back to system default keymap if Wayland is unavailable.
         let injection_delay_ms = Arc::new(AtomicU64::new(delay_ms));
-        let thread_delay_ms = Arc::clone(&injection_delay_ms);
         thread::Builder::new()
             .name("snipexpand-keymap".into())
             .spawn(move || match wayland_keymap_thread(keymap_tx.clone()) {
@@ -162,39 +194,67 @@ impl Injector {
                         "Wayland keymap unavailable ({}), falling back to system default",
                         e
                     );
-                    let _ = keymap_tx.send(KeymapLookup::build_default());
+                    let _ = keymap_tx.send(KeymapLookup::build_default_data());
                 }
             })
             .context("Failed to spawn keymap thread")?;
-
-        // Thread 2: uinput virtual keyboard for injection.
-        thread::Builder::new()
-            .name("snipexpand-uinput".into())
-            .spawn(move || {
-                if let Err(e) = uinput_thread(cmd_rx, thread_delay_ms) {
-                    tracing::error!("uinput thread error: {}", e);
-                }
-            })
-            .context("Failed to spawn uinput thread")?;
 
         let keymap = keymap_rx
             .recv_timeout(std::time::Duration::from_secs(5))
             .context("Timed out waiting for keymap")?;
 
+        // Thread 2: selected virtual keyboard transport for injection.
+        let thread_delay_ms = Arc::clone(&injection_delay_ms);
+        let injection_keymap = keymap.text.clone();
+        let (ready_tx, ready_rx) = mpsc::sync_channel(1);
+        thread::Builder::new()
+            .name("snipexpand-injector".into())
+            .spawn(move || {
+                if let Err(e) = injection_thread(
+                    cmd_rx,
+                    thread_delay_ms,
+                    backend,
+                    &injection_keymap,
+                    &wayland_text_chars,
+                    ready_tx,
+                ) {
+                    tracing::error!("injection thread error: {}", e);
+                }
+            })
+            .context("Failed to spawn injection thread")?;
+
+        let active_backend = ready_rx
+            .recv_timeout(std::time::Duration::from_secs(5))
+            .context("Timed out waiting for injection backend")?
+            .map_err(anyhow::Error::msg)?;
+        let selected_delay = match active_backend {
+            "wayland" => wayland_delay_ms,
+            "uinput" => uinput_delay_ms,
+            _ => None,
+        }
+        .unwrap_or(delay_ms);
+        injection_delay_ms.store(selected_delay, Ordering::Relaxed);
+        tracing::info!(backend = active_backend, "Injection backend ready");
+
         tracing::info!(
             "Keymap loaded, {} chars in lookup table",
-            keymap.table.len()
+            keymap.lookup.table.len()
         );
         Ok(Self {
             tx: cmd_tx,
-            keymap,
+            keymap: keymap.lookup,
             delay_ms: injection_delay_ms,
             settle_ms: AtomicU64::new(settle_ms),
+            backend: active_backend,
         })
     }
 
     pub fn keymap(&self) -> &KeymapLookup {
         &self.keymap
+    }
+
+    pub fn backend(&self) -> &'static str {
+        self.backend
     }
 
     pub fn set_delay_ms(&self, delay_ms: u64) {
@@ -272,9 +332,22 @@ impl Injector {
             .all(|ch| ch == '\n' || ch == '\t' || self.keymap.lookup(ch).is_some())
     }
 
-    /// Type through the compositor when the active XKB layout cannot represent
-    /// every character. `wtype` creates a temporary keymap, so Unicode is not
-    /// constrained by the physical keyboard layout.
+    pub fn type_wayland_text(&self, text: &str) -> Result<()> {
+        let (done, result) = mpsc::channel();
+        self.tx
+            .send(InjectionCmd::Text {
+                text: text.to_string(),
+                done,
+            })
+            .context("Wayland injection thread stopped")?;
+        result
+            .recv_timeout(std::time::Duration::from_secs(2))
+            .context("timed out waiting for Wayland text injection")?
+            .map_err(anyhow::Error::msg)
+    }
+
+    /// Last-resort compositor injection when the persistent startup text
+    /// keymaps do not contain a newly configured character.
     pub fn type_unicode(&self, text: &str) -> Result<()> {
         self.flush()?;
         let status = std::process::Command::new("wtype")
@@ -311,55 +384,368 @@ impl Injector {
 }
 
 // ---------------------------------------------------------------------------
-// uinput injection thread
+// Injection transports
 // ---------------------------------------------------------------------------
 
-fn uinput_thread(cmd_rx: mpsc::Receiver<InjectionCmd>, delay_ms: Arc<AtomicU64>) -> Result<()> {
-    // Register all common key codes (1–248 covers every standard key).
-    let mut keys = AttributeSet::<Key>::new();
-    for code in 1u16..=248 {
-        keys.insert(Key::new(code));
+trait KeyboardTransport {
+    fn send_key(&mut self, code: u16, value: i32) -> Result<()>;
+
+    fn send_text(&mut self, _text: &str, _delay_ms: u64) -> Result<()> {
+        anyhow::bail!("text injection is unsupported by this backend")
     }
+}
 
-    let mut device = VirtualDeviceBuilder::new()
-        .context("Failed to open /dev/uinput; is the 'input' group set?")?
-        .name("snipexpand virtual keyboard")
-        .with_keys(&keys)
-        .context("UI_SET_KEYBIT failed")?
-        .build()
-        .context("UI_DEV_CREATE failed")?;
+struct UinputKeyboard {
+    device: evdev::uinput::VirtualDevice,
+}
 
-    tracing::info!("uinput virtual keyboard created");
+impl UinputKeyboard {
+    fn new() -> Result<Self> {
+        let mut keys = AttributeSet::<Key>::new();
+        for code in 1u16..=248 {
+            keys.insert(Key::new(code));
+        }
 
-    // Brief pause so keyboard.rs hotplug watcher sees and filters the new device
-    // before we start injecting (prevents self-triggering).
-    std::thread::sleep(std::time::Duration::from_millis(200));
+        let device = VirtualDeviceBuilder::new()
+            .context("Failed to open /dev/uinput; is the 'input' group set?")?
+            .name("snipexpand virtual keyboard")
+            .with_keys(&keys)
+            .context("UI_SET_KEYBIT failed")?
+            .build()
+            .context("UI_DEV_CREATE failed")?;
+        Ok(Self { device })
+    }
+}
 
-    while let Ok(command) = cmd_rx.recv() {
-        let InjectionCmd::Key { code, value } = command else {
-            if let InjectionCmd::Flush(done) = command {
-                let _ = done.send(());
-            }
-            continue;
-        };
+impl KeyboardTransport for UinputKeyboard {
+    fn send_key(&mut self, code: u16, value: i32) -> Result<()> {
         let events = [
             InputEvent::new(EventType::KEY, code, value),
             InputEvent::new(EventType::SYNCHRONIZATION, 0, 0),
         ];
-        if let Err(e) = device.emit(&events) {
-            tracing::error!("uinput emit error: {}", e);
+        self.device.emit(&events).context("uinput emit")
+    }
+}
+
+struct VirtualKeyboardState {
+    seat: Option<wl_seat::WlSeat>,
+    manager: Option<ZwpVirtualKeyboardManagerV1>,
+}
+
+struct WaylandKeyboard {
+    connection: Connection,
+    keyboard: ZwpVirtualKeyboardV1,
+    text_keyboards: Vec<ZwpVirtualKeyboardV1>,
+    text_codes: HashMap<char, (usize, u16)>,
+    started: std::time::Instant,
+    depressed_modifiers: u32,
+    shift_mask: u32,
+    altgr_mask: u32,
+}
+
+impl WaylandKeyboard {
+    fn new(keymap: &str, text_chars: &str) -> Result<Self> {
+        if keymap.is_empty() {
+            anyhow::bail!("cannot create Wayland virtual keyboard without a keymap");
         }
-        // Each emit ends in SYN_REPORT. A 2 ms release gap gives the compositor
-        // time to consume each transition without producing a visible typing effect.
-        // Modifier releases get one extra millisecond to avoid state leakage.
-        if value == 0 {
-            let base_delay = delay_ms.load(Ordering::Relaxed);
-            let delay = if matches!(code, 42 | 54 | 100) && base_delay > 0 {
-                base_delay + 1
+        let connection = Connection::connect_to_env().context("connect to Wayland display")?;
+        let display = connection.display();
+        let mut queue = connection.new_event_queue::<VirtualKeyboardState>();
+        let qh = queue.handle();
+        let mut state = VirtualKeyboardState {
+            seat: None,
+            manager: None,
+        };
+        display.get_registry(&qh, ());
+        queue.roundtrip(&mut state)?;
+        let seat = state.seat.as_ref().context("compositor has no wl_seat")?;
+        let manager = state
+            .manager
+            .as_ref()
+            .context("compositor has no virtual-keyboard-v1 support")?;
+        let keyboard = manager.create_virtual_keyboard(seat, &qh, ());
+
+        let name = std::ffi::CString::new("snipexpand-keymap")?;
+        let fd = nix::sys::memfd::memfd_create(
+            name.as_c_str(),
+            nix::sys::memfd::MemFdCreateFlag::MFD_CLOEXEC,
+        )?;
+        let mut file = std::fs::File::from(fd);
+        file.write_all(keymap.as_bytes())?;
+        file.write_all(b"\0")?;
+        keyboard.keymap(1, file.as_fd(), keymap.len() as u32 + 1);
+        let mut text_keyboards = Vec::new();
+        let mut text_codes = HashMap::new();
+        for (keyboard_index, (text_keymap, codes)) in
+            build_text_keymaps(text_chars).into_iter().enumerate()
+        {
+            let text_keyboard = manager.create_virtual_keyboard(seat, &qh, ());
+            upload_keymap(&text_keyboard, &text_keymap)?;
+            text_keyboards.push(text_keyboard);
+            text_codes.extend(
+                codes
+                    .into_iter()
+                    .map(|(character, code)| (character, (keyboard_index, code))),
+            );
+        }
+        connection.roundtrip()?;
+
+        let context = xkb::Context::new(xkb::CONTEXT_NO_FLAGS);
+        let parsed = xkb::Keymap::new_from_string(
+            &context,
+            keymap.to_string(),
+            xkb::KEYMAP_FORMAT_TEXT_V1,
+            xkb::KEYMAP_COMPILE_NO_FLAGS,
+        )
+        .context("parse virtual keyboard keymap")?;
+        let modifier_mask = |name: &str| {
+            let index = parsed.mod_get_index(name);
+            if index != xkb::MOD_INVALID {
+                1u32 << index
             } else {
-                base_delay
-            };
-            std::thread::sleep(std::time::Duration::from_millis(delay));
+                0
+            }
+        };
+
+        Ok(Self {
+            connection,
+            keyboard,
+            text_keyboards,
+            text_codes,
+            started: std::time::Instant::now(),
+            depressed_modifiers: 0,
+            shift_mask: modifier_mask(xkb::MOD_NAME_SHIFT),
+            altgr_mask: modifier_mask(xkb::MOD_NAME_ISO_LEVEL3_SHIFT),
+        })
+    }
+}
+
+impl KeyboardTransport for WaylandKeyboard {
+    fn send_key(&mut self, code: u16, value: i32) -> Result<()> {
+        let modifier = match code {
+            42 | 54 => self.shift_mask,
+            100 => self.altgr_mask,
+            _ => 0,
+        };
+        if modifier != 0 {
+            if value == 0 {
+                self.depressed_modifiers &= !modifier;
+            } else {
+                self.depressed_modifiers |= modifier;
+            }
+            self.keyboard.modifiers(self.depressed_modifiers, 0, 0, 0);
+            return self.connection.flush().context("flush Wayland modifiers");
+        }
+        let state = if value == 0 {
+            wl_keyboard::KeyState::Released
+        } else {
+            wl_keyboard::KeyState::Pressed
+        };
+        let elapsed = self.started.elapsed().as_millis() as u32;
+        self.keyboard.key(elapsed, code as u32, state.into());
+        self.connection.flush().context("flush Wayland key event")
+    }
+
+    fn send_text(&mut self, text: &str, delay_ms: u64) -> Result<()> {
+        for ch in text.chars() {
+            let (keyboard_index, code) =
+                self.text_codes.get(&ch).copied().with_context(|| {
+                    format!("character {ch:?} was not in the startup text keymap")
+                })?;
+            let elapsed = self.started.elapsed().as_millis() as u32;
+            self.text_keyboards[keyboard_index].key(
+                elapsed,
+                code as u32,
+                wl_keyboard::KeyState::Pressed.into(),
+            );
+            self.text_keyboards[keyboard_index].key(
+                elapsed,
+                code as u32,
+                wl_keyboard::KeyState::Released.into(),
+            );
+            if delay_ms > 0 {
+                std::thread::sleep(std::time::Duration::from_millis(delay_ms));
+            }
+        }
+        self.connection.flush().context("flush Wayland text")
+    }
+}
+
+fn upload_keymap(keyboard: &ZwpVirtualKeyboardV1, keymap: &str) -> Result<()> {
+    let name = std::ffi::CString::new("snipexpand-text-keymap")?;
+    let fd = nix::sys::memfd::memfd_create(
+        name.as_c_str(),
+        nix::sys::memfd::MemFdCreateFlag::MFD_CLOEXEC,
+    )?;
+    let mut file = std::fs::File::from(fd);
+    file.write_all(keymap.as_bytes())?;
+    file.write_all(b"\0")?;
+    keyboard.keymap(1, file.as_fd(), keymap.len() as u32 + 1);
+    Ok(())
+}
+
+fn build_text_keymaps(text: &str) -> Vec<(String, HashMap<char, u16>)> {
+    let mut chars = text.chars().collect::<Vec<_>>();
+    chars.sort_unstable();
+    chars.dedup();
+    chars.chunks(246).map(build_text_keymap).collect()
+}
+
+fn build_text_keymap(chars: &[char]) -> (String, HashMap<char, u16>) {
+    let mut codes = HashMap::new();
+    let mut keycodes = String::new();
+    let mut symbols = String::new();
+    for (index, ch) in chars.iter().copied().enumerate() {
+        let code = index as u16 + 1;
+        codes.insert(ch, code);
+        keycodes.push_str(&format!("<K{code}> = {};\n", code + 8));
+        let keysym = match ch {
+            '\n' => "Return".to_string(),
+            '\t' => "Tab".to_string(),
+            '\u{1b}' => "Escape".to_string(),
+            _ => xkb::keysym_get_name(xkb::utf32_to_keysym(ch as u32)),
+        };
+        symbols.push_str(&format!("key <K{code}> {{[{keysym}]}};\n"));
+    }
+    let maximum = codes.len() + 9;
+    (
+        format!(
+            "xkb_keymap {{\n\
+             xkb_keycodes \"snipexpand\" {{ minimum = 8; maximum = {maximum}; {keycodes} }};\n\
+             xkb_types \"snipexpand\" {{ include \"complete\" }};\n\
+             xkb_compatibility \"snipexpand\" {{ include \"complete\" }};\n\
+             xkb_symbols \"snipexpand\" {{ {symbols} }};\n\
+             }};\n"
+        ),
+        codes,
+    )
+}
+
+impl Dispatch<wl_registry::WlRegistry, ()> for VirtualKeyboardState {
+    fn event(
+        state: &mut Self,
+        registry: &wl_registry::WlRegistry,
+        event: wl_registry::Event,
+        _: &(),
+        _: &Connection,
+        qh: &QueueHandle<Self>,
+    ) {
+        let wl_registry::Event::Global {
+            name,
+            interface,
+            version: _,
+        } = event
+        else {
+            return;
+        };
+        match interface.as_str() {
+            "wl_seat" => state.seat = Some(registry.bind(name, 1, qh, ())),
+            "zwp_virtual_keyboard_manager_v1" => {
+                state.manager = Some(registry.bind(name, 1, qh, ()))
+            }
+            _ => {}
+        }
+    }
+}
+
+impl Dispatch<wl_seat::WlSeat, ()> for VirtualKeyboardState {
+    fn event(
+        _: &mut Self,
+        _: &wl_seat::WlSeat,
+        _: wl_seat::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+    }
+}
+
+impl Dispatch<ZwpVirtualKeyboardManagerV1, ()> for VirtualKeyboardState {
+    fn event(
+        _: &mut Self,
+        _: &ZwpVirtualKeyboardManagerV1,
+        _: <ZwpVirtualKeyboardManagerV1 as wayland_client::Proxy>::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+    }
+}
+
+impl Dispatch<ZwpVirtualKeyboardV1, ()> for VirtualKeyboardState {
+    fn event(
+        _: &mut Self,
+        _: &ZwpVirtualKeyboardV1,
+        _: <ZwpVirtualKeyboardV1 as wayland_client::Proxy>::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+    }
+}
+
+fn injection_thread(
+    cmd_rx: mpsc::Receiver<InjectionCmd>,
+    delay_ms: Arc<AtomicU64>,
+    requested: InjectionBackend,
+    keymap: &str,
+    wayland_text_chars: &str,
+    ready: mpsc::SyncSender<std::result::Result<&'static str, String>>,
+) -> Result<()> {
+    let selected: Result<(Box<dyn KeyboardTransport>, &'static str)> = match requested {
+        InjectionBackend::Wayland => WaylandKeyboard::new(keymap, wayland_text_chars)
+            .map(|value| (Box::new(value) as _, "wayland")),
+        InjectionBackend::Uinput => {
+            UinputKeyboard::new().map(|value| (Box::new(value) as _, "uinput"))
+        }
+        InjectionBackend::Auto => match WaylandKeyboard::new(keymap, wayland_text_chars) {
+            Ok(value) => Ok((Box::new(value) as _, "wayland")),
+            Err(error) => {
+                tracing::warn!("Wayland injection unavailable ({error}); falling back to uinput");
+                UinputKeyboard::new().map(|value| (Box::new(value) as _, "uinput"))
+            }
+        },
+    };
+    let (mut keyboard, name) = match selected {
+        Ok(value) => value,
+        Err(error) => {
+            let message = error.to_string();
+            let _ = ready.send(Err(message.clone()));
+            anyhow::bail!(message);
+        }
+    };
+    let _ = ready.send(Ok(name));
+
+    if name == "uinput" {
+        // Let the hotplug watcher discover and exclude our virtual device.
+        std::thread::sleep(std::time::Duration::from_millis(200));
+    }
+
+    while let Ok(command) = cmd_rx.recv() {
+        match command {
+            InjectionCmd::Text { text, done } => {
+                let result = keyboard
+                    .send_text(&text, delay_ms.load(Ordering::Relaxed))
+                    .map_err(|error| error.to_string());
+                let _ = done.send(result);
+            }
+            InjectionCmd::Flush(done) => {
+                let _ = done.send(());
+            }
+            InjectionCmd::Key { code, value } => {
+                if let Err(e) = keyboard.send_key(code, value) {
+                    tracing::error!("{name} injection error: {e}");
+                }
+                if value == 0 {
+                    let base_delay = delay_ms.load(Ordering::Relaxed);
+                    let delay = if matches!(code, 42 | 54 | 100) && base_delay > 0 {
+                        base_delay + 1
+                    } else {
+                        base_delay
+                    };
+                    std::thread::sleep(std::time::Duration::from_millis(delay));
+                }
+            }
         }
     }
     Ok(())
@@ -371,11 +757,11 @@ fn uinput_thread(cmd_rx: mpsc::Receiver<InjectionCmd>, delay_ms: Arc<AtomicU64>)
 
 struct WaylandKeymapState {
     seat: Option<wl_seat::WlSeat>,
-    keymap_tx: Option<mpsc::Sender<KeymapLookup>>,
+    keymap_tx: Option<mpsc::Sender<KeymapData>>,
     keymap_sent: bool,
 }
 
-fn wayland_keymap_thread(keymap_tx: mpsc::Sender<KeymapLookup>) -> Result<()> {
+fn wayland_keymap_thread(keymap_tx: mpsc::Sender<KeymapData>) -> Result<()> {
     let conn = Connection::connect_to_env()
         .context("Failed to connect to Wayland display (WAYLAND_DISPLAY not set?)")?;
     let display = conn.display();
@@ -463,22 +849,50 @@ impl Dispatch<wl_keyboard::WlKeyboard, ()> for WaylandKeymapState {
             let keymap_str = {
                 let mut file = unsafe { std::fs::File::from_raw_fd(fd.into_raw_fd()) };
                 let mut s = String::with_capacity(size as usize);
-                if let Err(error) = file.by_ref().take(size as u64).read_to_string(&mut s) {
+                if let Err(error) = (&mut file).take(size as u64).read_to_string(&mut s) {
                     tracing::warn!("Failed to read Wayland keymap: {}", error);
                 }
                 // Wayland sends the keymap with a null terminator; strip it before
                 // passing to xkbcommon which uses CString internally.
                 s.trim_end_matches('\0').to_string()
             };
-            let mut lookup = KeymapLookup::build(&keymap_str);
-            if lookup.table.is_empty() {
+            let mut data = KeymapData {
+                lookup: KeymapLookup::build(&keymap_str),
+                text: keymap_str,
+            };
+            if data.lookup.table.is_empty() {
                 tracing::warn!("Wayland keymap was unusable; falling back to system default");
-                lookup = KeymapLookup::build_default();
+                data = KeymapLookup::build_default_data();
             }
             if let Some(tx) = state.keymap_tx.take() {
-                let _ = tx.send(lookup);
+                let _ = tx.send(data);
             }
             state.keymap_sent = true;
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn persistent_text_keymap_has_level_zero_unicode() {
+        let maps = build_text_keymaps("A€¯ツ");
+        assert_eq!(maps.len(), 1);
+        let (keymap, codes) = &maps[0];
+        let context = xkb::Context::new(xkb::CONTEXT_NO_FLAGS);
+        let parsed = xkb::Keymap::new_from_string(
+            &context,
+            keymap.clone(),
+            xkb::KEYMAP_FORMAT_TEXT_V1,
+            xkb::KEYMAP_COMPILE_NO_FLAGS,
+        )
+        .expect("generated keymap should parse");
+        let lookup = KeymapLookup::build_from_xkb(&parsed);
+        for character in ['A', '€', '¯', 'ツ'] {
+            assert!(codes.contains_key(&character));
+            assert_eq!(lookup.lookup(character).unwrap().level, 0);
         }
     }
 }

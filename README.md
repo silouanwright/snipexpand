@@ -12,8 +12,9 @@
 
 SnipExpand is a focused text expander for Linux/Wayland, developed specifically to
 work flawlessly on [Omarchy](https://omarchy.org). It listens for shortcuts
-through `evdev` and types their replacements through a `uinput` virtual
-keyboard, avoiding application-specific integrations and clipboard mutation.
+through `evdev` and types their replacements through a persistent Wayland
+virtual keyboard, with `uinput` as a compatibility fallback. It avoids
+application-specific integrations and clipboard mutation.
 
 It is built and tested primarily on Omarchy and Hyprland. SnipExpand is young and
 its first release is deliberately focused, but the ambition is larger: make text
@@ -80,7 +81,7 @@ Linux/Wayland experience, then growing from that foundation.
 | Date variables | Yes | Yes |
 | Backspace undo | Simple expansions | Yes |
 | Application exclusions | Title/class/executable regex | Per-app configuration and filters |
-| Unicode outside the active layout | `wtype` fallback | Platform-dependent backends |
+| Unicode outside the active layout | Persistent modifier-free Wayland keymaps, with `wtype` fallback | Platform-dependent backends |
 | Shell/scripts and dynamic variables | No | Yes |
 | Forms, choices, images, and rich text | No | Yes |
 | Packages and community ecosystem | No | Yes |
@@ -99,7 +100,8 @@ existing Espanso configuration.
 - Multiline replacements and `$|$` cursor placement
 - Word boundaries and case propagation
 - Date variables with formatting and offsets
-- Unicode fallback through `wtype`
+- Persistent, modifier-free Unicode injection on supported Wayland compositors
+- Warnings for immediate-mode triggers made unreachable by shorter prefixes
 - Immediate Backspace undo for simple expansions
 - Regex-based application exclusions
 - Strict configuration validation and runtime diagnostics
@@ -114,10 +116,10 @@ back to `wlrctl` where available.
 
 Requirements:
 
-- Linux with readable `/dev/input/event*` devices and writable `/dev/uinput`
+- Linux with readable `/dev/input/event*` devices
 - A Wayland session
 - `libxkbcommon` and Wayland client libraries
-- `wtype` for characters absent from the active keyboard layout and for undo
+- `wtype` as a fallback for Unicode added after daemon startup
 - Membership in the system `input` group, unless equivalent device permissions
   are configured
 
@@ -134,8 +136,9 @@ Exclusions prevent expansion; they do not prevent the process from receiving
 the underlying keyboard events.
 
 SnipExpand does not execute shell commands from match files and does not use or
-modify the clipboard. Its optional `wtype` fallback creates input through the
-compositor when a character cannot be produced by the active XKB layout.
+modify the clipboard. Its persistent Wayland text keyboards map configured
+replacement characters without shared modifier state. The optional `wtype`
+fallback handles characters added after daemon startup.
 
 ## Install
 
@@ -215,7 +218,10 @@ they never reformat handwritten match files.
 # ~/.config/snipexpand/config.yml
 trigger_mode: space
 terminators: [space, enter]
-injection_delay_ms: 2
+injection_backend: auto
+injection_delay_ms: 1
+wayland_injection_delay_ms: 0
+uinput_injection_delay_ms: 1
 injection_settle_ms: 10
 undo_enabled: true
 app_exclusions:
@@ -227,10 +233,25 @@ app_exclusions:
 `space`, `enter`, or `tab` terminator completes a match; SnipExpand removes the
 terminator along with the trigger.
 
+`injection_backend` can be `auto`, `wayland`, or `uinput`. `auto` prefers a
+persistent Wayland virtual keyboard and falls back to `uinput` when the
+compositor does not expose the required protocol. Changing the backend requires
+a daemon restart; other settings continue to hot-reload.
+
 `injection_delay_ms` controls the pause after each synthetic key release. The
-2 ms default feels effectively immediate on Hyprland while preserving event
-ordering. Raise it if an application drops or reorders characters. A value of
-`0` is fastest but is not reliable everywhere.
+shared starter value is 1 ms. The Wayland-specific 0 ms override is the tested
+Omarchy default and keeps replacement transactions as short as possible. The
+uinput fallback retains 1 ms pacing. Raise a backend-specific value if an
+application or compositor drops or reorders characters.
+
+`wayland_injection_delay_ms` and `uinput_injection_delay_ms` optionally override
+the shared delay for one transport. Omit either value to inherit
+`injection_delay_ms`. This is especially useful with `auto` when one transport
+needs more pacing than the other on a particular compositor.
+
+In immediate mode, a short trigger can make a longer trigger unreachable. For
+example, `;eur` expands before `;euro` can be completed. `snipexpand check` and
+the daemon log identify these conflicts with both source files.
 
 `injection_settle_ms` is a one-time pause before SnipExpand deletes the trigger.
 It gives the focused application time to receive the physical keystrokes and

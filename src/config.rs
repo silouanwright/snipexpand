@@ -12,6 +12,15 @@ pub enum TriggerMode {
     Space,
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum InjectionBackend {
+    #[default]
+    Auto,
+    Wayland,
+    Uinput,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Terminator {
@@ -27,9 +36,18 @@ pub struct Settings {
     pub trigger_mode: TriggerMode,
     #[serde(default = "default_terminators")]
     pub terminators: Vec<Terminator>,
+    /// Injection transport. Auto prefers Wayland and falls back to uinput.
+    #[serde(default)]
+    pub injection_backend: InjectionBackend,
     /// Milliseconds to pause after each injected key release.
     #[serde(default = "default_injection_delay_ms")]
     pub injection_delay_ms: u64,
+    /// Optional Wayland-specific override for injection_delay_ms.
+    #[serde(default)]
+    pub wayland_injection_delay_ms: Option<u64>,
+    /// Optional uinput-specific override for injection_delay_ms.
+    #[serde(default)]
+    pub uinput_injection_delay_ms: Option<u64>,
     /// One-time pause before deleting a matched trigger.
     #[serde(default = "default_injection_settle_ms")]
     pub injection_settle_ms: u64,
@@ -44,7 +62,10 @@ impl Default for Settings {
         Self {
             trigger_mode: TriggerMode::Immediate,
             terminators: default_terminators(),
+            injection_backend: InjectionBackend::Auto,
             injection_delay_ms: default_injection_delay_ms(),
+            wayland_injection_delay_ms: None,
+            uinput_injection_delay_ms: None,
             injection_settle_ms: default_injection_settle_ms(),
             app_exclusions: Vec::new(),
             undo_enabled: true,
@@ -57,7 +78,7 @@ fn default_terminators() -> Vec<Terminator> {
 }
 
 fn default_injection_delay_ms() -> u64 {
-    2
+    1
 }
 
 fn default_injection_settle_ms() -> u64 {
@@ -78,6 +99,15 @@ impl Settings {
                 Terminator::Tab => '\t',
             })
             .collect()
+    }
+
+    pub fn injection_delay_for(&self, backend: &str) -> u64 {
+        match backend {
+            "wayland" => self.wayland_injection_delay_ms,
+            "uinput" => self.uinput_injection_delay_ms,
+            _ => None,
+        }
+        .unwrap_or(self.injection_delay_ms)
     }
 }
 
@@ -180,6 +210,14 @@ pub struct Config {
     pub matches: Vec<Match>,
     pub loaded_files: Vec<PathBuf>,
     pub legacy_loaded: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UnreachableTrigger {
+    pub trigger: String,
+    pub source: PathBuf,
+    pub blocking_trigger: String,
+    pub blocking_source: PathBuf,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -339,6 +377,20 @@ impl Config {
         if self.settings.injection_delay_ms > 50 {
             bail!("injection_delay_ms must be between 0 and 50");
         }
+        if self
+            .settings
+            .wayland_injection_delay_ms
+            .is_some_and(|value| value > 50)
+        {
+            bail!("wayland_injection_delay_ms must be between 0 and 50");
+        }
+        if self
+            .settings
+            .uinput_injection_delay_ms
+            .is_some_and(|value| value > 50)
+        {
+            bail!("uinput_injection_delay_ms must be between 0 and 50");
+        }
         if self.settings.injection_settle_ms > 100 {
             bail!("injection_settle_ms must be between 0 and 100");
         }
@@ -384,6 +436,45 @@ impl Config {
             .app_exclusions
             .iter()
             .any(|filter| filter.matches(app))
+    }
+
+    /// Find longer triggers that immediate mode can never reach because a
+    /// shorter trigger expands before the remaining characters are typed.
+    pub fn unreachable_triggers(&self) -> Vec<UnreachableTrigger> {
+        if self.settings.trigger_mode != TriggerMode::Immediate {
+            return Vec::new();
+        }
+        let triggers = self
+            .matches
+            .iter()
+            .flat_map(|item| {
+                item.triggers
+                    .iter()
+                    .map(move |trigger| (trigger.as_str(), item))
+            })
+            .collect::<Vec<_>>();
+        let mut unreachable = Vec::new();
+        for (trigger, item) in &triggers {
+            let blocker = triggers
+                .iter()
+                .filter(|(shorter, shorter_item)| {
+                    shorter.len() < trigger.len()
+                        && trigger.starts_with(shorter)
+                        && !shorter_item.word
+                        && !shorter_item.right_word
+                })
+                .min_by_key(|(shorter, _)| shorter.chars().count());
+            if let Some((blocking_trigger, blocking_item)) = blocker {
+                unreachable.push(UnreachableTrigger {
+                    trigger: (*trigger).to_string(),
+                    source: item.source.clone(),
+                    blocking_trigger: (*blocking_trigger).to_string(),
+                    blocking_source: blocking_item.source.clone(),
+                });
+            }
+        }
+        unreachable.sort_by(|left, right| left.trigger.cmp(&right.trigger));
+        unreachable
     }
 
     pub fn add_generated(trigger: &str, expansion: &str) -> Result<()> {
@@ -655,10 +746,14 @@ matches:
         let dir = TempDir::new().unwrap();
         write(
             &dir.path().join("config.yml"),
-            "injection_delay_ms: 3\ninjection_settle_ms: 12\n",
+            "injection_backend: wayland\ninjection_delay_ms: 3\nwayland_injection_delay_ms: 0\nuinput_injection_delay_ms: 1\ninjection_settle_ms: 12\n",
         );
         let config = Config::load_dir(dir.path()).unwrap();
+        assert_eq!(config.settings.injection_backend, InjectionBackend::Wayland);
         assert_eq!(config.settings.injection_delay_ms, 3);
+        assert_eq!(config.settings.injection_delay_for("wayland"), 0);
+        assert_eq!(config.settings.injection_delay_for("uinput"), 1);
+        assert_eq!(config.settings.injection_delay_for("other"), 3);
         assert_eq!(config.settings.injection_settle_ms, 12);
 
         write(&dir.path().join("config.yml"), "injection_delay_ms: 51\n");
@@ -730,6 +825,30 @@ matches:
         );
         let error = Config::load_dir(dir.path()).unwrap_err().to_string();
         assert!(error.contains("duplicate trigger ';same'"));
+    }
+
+    #[test]
+    fn warns_about_unreachable_immediate_triggers() {
+        let dir = TempDir::new().unwrap();
+        write(
+            &dir.path().join("match/short.yml"),
+            "matches:\n  - trigger: ';eur'\n    replace: '€'\n",
+        );
+        write(
+            &dir.path().join("match/long.yml"),
+            "matches:\n  - trigger: ';euro'\n    replace: '€'\n",
+        );
+        let config = Config::load_dir(dir.path()).unwrap();
+        let warnings = config.unreachable_triggers();
+        assert_eq!(warnings.len(), 1);
+        assert_eq!(warnings[0].trigger, ";euro");
+        assert_eq!(warnings[0].blocking_trigger, ";eur");
+
+        write(&dir.path().join("config.yml"), "trigger_mode: space\n");
+        assert!(Config::load_dir(dir.path())
+            .unwrap()
+            .unreachable_triggers()
+            .is_empty());
     }
 
     #[test]

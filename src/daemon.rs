@@ -56,13 +56,18 @@ pub async fn run(config: Config) -> Result<()> {
         )
         .init();
     tracing::info!("SnipExpand daemon starting");
+    log_config_warnings(&config);
 
     // Spawn Wayland thread (blocks until keymap received)
     let injector = Injector::spawn(
+        config.settings.injection_backend,
         config.settings.injection_delay_ms,
+        config.settings.wayland_injection_delay_ms,
+        config.settings.uinput_injection_delay_ms,
         config.settings.injection_settle_ms,
+        wayland_text_characters(&config),
     )?;
-    tracing::info!("uinput injection keyboard ready");
+    tracing::info!("Injection keyboard ready");
 
     // Open evdev keyboard stream
     let mut kb_stream = KeyboardStream::new().await?;
@@ -193,6 +198,7 @@ pub async fn run(config: Config) -> Result<()> {
                                 running: true,
                                 version: env!("CARGO_PKG_VERSION").to_string(),
                                 pid: std::process::id(),
+                                injection_backend: injector.backend().to_string(),
                                 match_groups: cfg.matches.len(),
                                 triggers: cfg.matches.iter().map(|item| item.triggers.len()).sum(),
                                 files: cfg.loaded_files.len(),
@@ -370,6 +376,12 @@ fn inject_expansion(
 }
 
 fn type_with_fallback(injector: &Injector, text: &str) {
+    if injector.backend() == "wayland" {
+        match injector.type_wayland_text(text) {
+            Ok(()) => return,
+            Err(error) => tracing::warn!("Persistent Wayland text unavailable: {}", error),
+        }
+    }
     if injector.can_type(text) {
         injector.type_text(text);
     } else if let Err(error) = injector.type_unicode(text) {
@@ -377,19 +389,47 @@ fn type_with_fallback(injector: &Injector, text: &str) {
     }
 }
 
+fn wayland_text_characters(config: &Config) -> String {
+    let mut text = (' '..='~').collect::<String>();
+    text.push('\n');
+    text.push('\t');
+    for item in &config.matches {
+        text.push_str(&item.replace);
+    }
+    text
+}
+
 fn reload_config(config: &Arc<Mutex<Config>>, expander: &mut Expander, injector: &Injector) {
     match Config::load_default() {
         Ok(new_cfg) => {
+            if new_cfg.settings.injection_backend
+                != config.lock().unwrap().settings.injection_backend
+            {
+                tracing::warn!("injection_backend changes require a daemon restart");
+            }
             expander.update_configured(
                 new_cfg.matches.clone(),
                 new_cfg.settings.trigger_mode,
                 new_cfg.settings.terminator_chars(),
             );
-            injector.set_delay_ms(new_cfg.settings.injection_delay_ms);
+            injector.set_delay_ms(new_cfg.settings.injection_delay_for(injector.backend()));
             injector.set_settle_ms(new_cfg.settings.injection_settle_ms);
             *config.lock().unwrap() = new_cfg;
+            log_config_warnings(&config.lock().unwrap());
             tracing::info!("Config reloaded");
         }
         Err(e) => tracing::warn!("Failed to reload config: {}", e),
+    }
+}
+
+fn log_config_warnings(config: &Config) {
+    for warning in config.unreachable_triggers() {
+        tracing::warn!(
+            trigger = warning.trigger,
+            source = %warning.source.display(),
+            blocking_trigger = warning.blocking_trigger,
+            blocking_source = %warning.blocking_source.display(),
+            "Trigger is unreachable in immediate mode because its prefix expands first"
+        );
     }
 }

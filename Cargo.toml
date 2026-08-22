@@ -25,6 +25,7 @@ tokio-stream = "0.1"
 
 # Wayland (for XKB keymap retrieval only)
 wayland-client = "0.31"
+wayland-protocols-misc = { version = "0.3", features = ["client"] }
 
 # XKB keyboard layout
 xkbcommon = "0.7"

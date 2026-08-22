@@ -10,7 +10,7 @@ than silently changing their behavior.
 | --- | --- | --- |
 | `trigger` | Full | Static triggers |
 | `triggers` | Full | Multiple triggers share one replacement |
-| `replace` | Full | Unicode falls back to compositor-native `wtype`; multiline YAML strings supported |
+| `replace` | Full | Persistent Wayland text keymaps support configured Unicode; multiline YAML strings supported |
 | `$|$` | Full | First cursor marker controls final cursor position |
 | `word` | Core | Requires both left and right word boundaries |
 | `left_word` | Core | Unicode alphanumerics and `_` count as word characters |
@@ -30,7 +30,10 @@ than silently changing their behavior.
 ```yaml
 trigger_mode: immediate # or space
 terminators: [space]    # any combination of space, enter, tab
-injection_delay_ms: 2   # 0–50; raise if an application drops injected keys
+injection_backend: auto # auto, wayland, or uinput; restart after changing
+injection_delay_ms: 1   # 0–50; shared fallback
+wayland_injection_delay_ms: 0 # tested Omarchy/Hyprland default
+uinput_injection_delay_ms: 1  # optional backend-specific override
 injection_settle_ms: 10 # 0–100; one-time pause before trigger deletion
 undo_enabled: true      # immediate Backspace restores a plain expansion's trigger
 app_exclusions:         # regex filters; entries are OR, fields are AND
@@ -53,8 +56,13 @@ behavior and tests. Unknown fields are errors.
 
 ## Runtime limits
 
-SnipExpand detects physical keyboard input through evdev and normally injects through uinput.
-It cannot infer whether a browser currently focuses a password field. Characters
-absent from the active XKB layout use `wtype`, which must be installed and supported
-by the compositor. IME/Fcitx5-transformed text can differ from the raw keys observed
-by SnipExpand.
+SnipExpand detects physical keyboard input through evdev. `auto` prefers
+Wayland virtual-keyboard injection and falls back to uinput. Configured
+replacement characters are mapped across persistent modifier-free Wayland text
+keyboards at startup. Newly added Unicode characters can temporarily fall back
+to `wtype` until restart. It cannot infer whether a browser currently focuses a
+password field. IME/Fcitx5-transformed text can differ from the raw keys
+observed by SnipExpand.
+
+In immediate mode, `snipexpand check` warns when a shorter trigger makes a
+longer trigger unreachable.

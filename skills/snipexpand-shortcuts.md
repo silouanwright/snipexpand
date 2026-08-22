@@ -169,6 +169,9 @@ journalctl --user -u snipexpand -n 100 --no-pager
 `snipexpand status` contacts the daemon instead of trusting that a socket file
 exists. Its JSON form is suitable for status bars and desktop integrations and
 includes configuration validity, version, process ID, and loaded match counts.
+It also reports the active `wayland` or `uinput` injection backend.
+In immediate mode, it warns when a shorter trigger makes a longer trigger
+unreachable and names both source files.
 
 If Espanso is running, it may exclusively grab the keyboard and prevent SnipExpand
 from seeing events. Do not disable services or change group membership unless

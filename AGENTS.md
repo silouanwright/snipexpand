@@ -2,14 +2,14 @@
 
 ## Project purpose
 
-`snipexpand` is a Rust-based, Wayland-native text expander for Linux. It reads physical keyboard events through `evdev`, matches configured triggers, and injects expansions via a `uinput` virtual keyboard. Wayland is used only to fetch the active XKB keymap.
+`snipexpand` is a Rust-based, Wayland-native text expander for Linux. It reads physical keyboard events through `evdev`, matches configured triggers, and prefers persistent Wayland virtual-keyboard injection with `uinput` as a compatibility fallback.
 
 ## Repository map
 
 - `src/main.rs`: CLI entry point, subcommands, daemon startup, service installer
 - `src/daemon.rs`: main async runtime and event loop
 - `src/keyboard.rs`: physical keyboard discovery and evdev event ingestion
-- `src/injector.rs`: XKB keymap handling and uinput-based text injection
+- `src/injector.rs`: XKB keymaps, persistent Wayland injection, and uinput fallback
 - `src/expander.rs`: rolling buffer and trigger matching
 - `src/config.rs`: strict YAML loading, legacy TOML compatibility, and validation
 - `src/ipc.rs`: UNIX socket IPC used by `reload` and `status`
@@ -46,16 +46,19 @@ journalctl --user -u snipexpand -f
   word boundaries and configurable Space/Enter/Tab termination.
 - Injection sends backspaces first, expanded text, then any Left-arrow events
   required by a `$|$` cursor marker.
+- Wayland uses the active layout for editing keys and separate modifier-free
+  text keyboards for configured replacement characters.
 - The uinput device name is intentionally `snipexpand virtual keyboard` so it can be filtered out and not re-read as physical input.
 
 ## Important constraints / pitfalls
 
-- GNOME does not expose `zwp_virtual_keyboard_manager_v1`; do not reintroduce protocol-based injection unless compositor support is verified.
+- GNOME does not expose `zwp_virtual_keyboard_manager_v1`; `auto` must retain
+  the uinput fallback.
 - `uinput` timing delays matter. Removing them causes modifier bleed and scrambled output.
 - The Wayland keymap payload may include a trailing `\0`; trim it before building XKB structures.
 - Config watcher threads must not block runtime shutdown.
-- Duplicate triggers are rejected with both source paths; longer matches are
-  evaluated first so prefix-related triggers remain deterministic.
+- Duplicate triggers are rejected with both source paths. Immediate-mode
+  prefix conflicts are valid but must be reported as unreachable triggers.
 - Unsupported Espanso fields must fail validation rather than being ignored.
 - Avoid editing generated files under `target/`.
 - This repo may contain local, not-yet-pushed work. Check `git status --short` before making broader changes.
