@@ -49,7 +49,9 @@ alternatives below.
 
 ## Requirements
 
-- Linux with a Wayland session
+Omarchy includes everything SnipExpand needs by default. On other Wayland
+systems, you need:
+
 - `libxkbcommon` and Wayland client libraries
 - Read access to `/dev/input/event*`, usually through the system `input` group
 - `wtype` for the Unicode fallback path
