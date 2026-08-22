@@ -100,21 +100,25 @@ global_vars:
       format: "%Y-%m-%d"
 
 matches:
+  # Multiple triggers, one replacement
   - triggers: [";mail", ";email"]
     replace: "user@example.com"
 
+  # Whole-word matching and multiline text
   - trigger: ";sig"
     word: true
     replace: |
       Best regards,
       Your Name
 
+  # Put the cursor at $|$ after expansion
   - trigger: ";function"
     replace: |
       fn example() {
           $|$
       }
 
+  # Insert a formatted date
   - trigger: ";today"
     replace: "{{today}}"
 ```
@@ -124,25 +128,27 @@ matches:
 Settings live in `~/.config/snipexpand/config.yml`:
 
 ```yaml
+# Wait for Space or Enter. Use "immediate" to expand a complete trigger at once.
 trigger_mode: space
 terminators: [space, enter]
+
+# Prefer native Wayland injection and fall back to uinput.
 injection_backend: auto
+
+# Tune these only if an application drops or reorders characters.
 injection_delay_ms: 1
 wayland_injection_delay_ms: 0
 uinput_injection_delay_ms: 1
 injection_settle_ms: 10
+
+# Backspace immediately after a simple expansion to restore its trigger.
 undo_enabled: true
+
+# Disable expansion in matching applications.
 app_exclusions:
   - class: "^1Password$"
   - class: "^org\\.keepassxc\\.KeePassXC$"
 ```
-
-`trigger_mode` can be `immediate` or `space`. Immediate mode expands a complete
-trigger. Space mode waits for a configured Space, Enter, or Tab terminator.
-
-`injection_backend: auto` prefers persistent Wayland injection and uses
-`uinput` when the compositor does not expose the required protocol. Adjust
-the timing values if a particular application drops or reorders keystrokes.
 
 Run `snipexpand detect` while an application is focused to find the title,
 class, and executable values needed for an exclusion.
