@@ -18,21 +18,9 @@ clipboard or requiring editor-specific plugins.
 
 ## Why SnipExpand?
 
-SnipExpand is built around one job: dependable text expansion on Omarchy and
-Hyprland. It captures input through Linux input devices and keeps a native
-Wayland virtual keyboard open for fast, clipboard-free expansion. Unlike tools
-that launch an injector for each replacement or paste through the clipboard,
-the normal expansion path is persistent and can run with no per-character
-delay.
-
-Configuration remains ordinary YAML that can be searched, reviewed, backed up,
-and versioned with Git. SnipExpand reloads it automatically, rejects unsupported
-configuration instead of silently ignoring it, and provides commands for
-validation, application detection, status, and setup diagnostics.
-
-The daemon does not execute commands from snippets, contact online services, or
-read and replace clipboard contents. Its focused scope keeps the
-security-sensitive input path smaller and easier to audit.
+Text expansion on Omarchy and Hyprland is still unreliable or awkward.
+SnipExpand was built specifically to work well there. [Compare it with the
+alternatives](#alternatives).
 
 ## Features
 
