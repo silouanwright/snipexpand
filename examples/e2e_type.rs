@@ -38,6 +38,17 @@ fn navigation_event_delay() -> Duration {
     })
 }
 
+fn expansion_pause() -> Duration {
+    static DELAY: OnceLock<Duration> = OnceLock::new();
+    *DELAY.get_or_init(|| {
+        let millis = std::env::var("SNIPEXPAND_E2E_EXPANSION_PAUSE_MS")
+            .ok()
+            .and_then(|value| value.parse().ok())
+            .unwrap_or(250);
+        Duration::from_millis(millis)
+    })
+}
+
 fn emit_key_with_delay(
     device: &mut VirtualDevice,
     code: u16,
@@ -274,11 +285,76 @@ fn run_live_reload_demo() -> anyhow::Result<()> {
     Ok(())
 }
 
+fn type_trigger(device: &mut VirtualDevice, trigger: &str) -> anyhow::Result<()> {
+    for character in trigger.chars().chain(std::iter::once(' ')) {
+        emit_character(device, character)?;
+    }
+    std::thread::sleep(expansion_pause());
+    Ok(())
+}
+
+fn run_compatibility_suite() -> anyhow::Result<()> {
+    let mut device = create_device()?;
+    std::thread::sleep(Duration::from_millis(1500));
+
+    for trigger in [";ascii", ";unicode", ";multi"] {
+        type_trigger(&mut device, trigger)?;
+        emit_key(&mut device, 28)?; // Enter
+    }
+
+    type_trigger(&mut device, ";cursor")?;
+    for character in "CURSOR".chars() {
+        emit_character(&mut device, character)?;
+    }
+    emit_key(&mut device, 107)?; // End
+    emit_key(&mut device, 28)?; // Enter
+
+    type_trigger(&mut device, ";undo")?;
+    emit_key(&mut device, 14)?; // Backspace restores the original trigger.
+    emit_key(&mut device, 28)?; // Enter
+
+    for _ in 0..20 {
+        type_trigger(&mut device, ";burst")?;
+    }
+
+    std::thread::sleep(Duration::from_millis(500));
+    emit_key(&mut device, 1)?; // Escape
+    for character in ":wq".chars() {
+        emit_character(&mut device, character)?;
+    }
+    emit_key(&mut device, 28)?; // Enter
+    std::thread::sleep(Duration::from_millis(500));
+    Ok(())
+}
+
+fn run_multiline_probe() -> anyhow::Result<()> {
+    let mut device = create_device()?;
+    std::thread::sleep(Duration::from_millis(1500));
+    type_trigger(&mut device, ";multi")?;
+    emit_key(&mut device, 28)?; // Enter after the expansion.
+    for character in "NEXT".chars() {
+        emit_character(&mut device, character)?;
+    }
+    std::thread::sleep(Duration::from_millis(250));
+    emit_key(&mut device, 1)?; // Escape
+    for character in ":wq".chars() {
+        emit_character(&mut device, character)?;
+    }
+    emit_key(&mut device, 28)?;
+    Ok(())
+}
+
 fn main() -> anyhow::Result<()> {
     let mut args = std::env::args().skip(1);
     let trigger = args.next().unwrap_or_else(|| ";snipexpand".to_string());
     if trigger == "--live-reload-demo" {
         return run_live_reload_demo();
+    }
+    if trigger == "--compatibility" {
+        return run_compatibility_suite();
+    }
+    if trigger == "--compatibility-multiline" {
+        return run_multiline_probe();
     }
     if trigger == "--batch-file" {
         let path = args

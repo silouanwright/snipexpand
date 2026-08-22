@@ -1,4 +1,5 @@
 use anyhow::Result;
+use std::collections::HashSet;
 use std::sync::{Arc, Mutex};
 use tokio::io::AsyncWriteExt;
 use tokio::signal::unix::{signal, SignalKind};
@@ -13,6 +14,23 @@ use crate::keyboard::KeyboardStream;
 const KEY_BACKSPACE: u16 = 14;
 const KEY_TAB: u16 = 15;
 const KEY_ENTER: u16 = 28;
+const MODIFIER_KEYS: &[u16] = &[
+    29,  // KEY_LEFTCTRL
+    42,  // KEY_LEFTSHIFT
+    54,  // KEY_RIGHTSHIFT
+    56,  // KEY_LEFTALT
+    97,  // KEY_RIGHTCTRL
+    100, // KEY_RIGHTALT / AltGr
+    125, // KEY_LEFTMETA
+    126, // KEY_RIGHTMETA
+];
+const SHORTCUT_MODIFIERS: &[u16] = &[
+    29,  // KEY_LEFTCTRL
+    56,  // KEY_LEFTALT
+    97,  // KEY_RIGHTCTRL
+    125, // KEY_LEFTMETA
+    126, // KEY_RIGHTMETA
+];
 // Keys that reset the expansion buffer (cursor movement)
 const RESET_KEYS: &[u16] = &[
     105, // KEY_LEFT
@@ -41,11 +59,38 @@ struct PendingExpansion {
 
 #[derive(Default)]
 struct InputState {
-    shift_held: bool,
-    altgr_held: bool,
+    held_modifiers: HashSet<u16>,
     undo: Option<Undo>,
     pending_undo: Option<Undo>,
     pending_expansion: Option<PendingExpansion>,
+}
+
+impl InputState {
+    fn update_modifier(&mut self, code: u16, value: i32) {
+        match value {
+            0 => {
+                self.held_modifiers.remove(&code);
+            }
+            1 => {
+                self.held_modifiers.insert(code);
+            }
+            _ => {}
+        }
+    }
+
+    fn shift_held(&self) -> bool {
+        self.held_modifiers.contains(&42) || self.held_modifiers.contains(&54)
+    }
+
+    fn altgr_held(&self) -> bool {
+        self.held_modifiers.contains(&100)
+    }
+
+    fn shortcut_held(&self) -> bool {
+        self.held_modifiers
+            .iter()
+            .any(|code| SHORTCUT_MODIFIERS.contains(code))
+    }
 }
 
 pub async fn run(config: Config) -> Result<()> {
@@ -137,20 +182,16 @@ pub async fn run(config: Config) -> Result<()> {
             event = kb_stream.next_event() => {
                 match event {
                     Some(ev) => {
-                        // Update modifier state on both press and release.
+                        if MODIFIER_KEYS.contains(&ev.code) {
+                            input.update_modifier(ev.code, ev.value);
+                            if SHORTCUT_MODIFIERS.contains(&ev.code) {
+                                cancel_input_context(&mut expander, &mut input);
+                            } else if ev.value == 0 {
+                                complete_pending_expansion(&injector, &config, &mut input, ev.code);
+                            }
+                            continue;
+                        }
                         match ev.code {
-                            42 | 54 => {
-                                input.shift_held = ev.value == 1;
-                                if ev.value == 0 {
-                                    complete_pending_expansion(&injector, &config, &mut input, ev.code);
-                                }
-                            }   // L/R Shift
-                            100 => {
-                                input.altgr_held = ev.value == 1;
-                                if ev.value == 0 {
-                                    complete_pending_expansion(&injector, &config, &mut input, ev.code);
-                                }
-                            } // Right Alt / AltGr
                             _ if ev.value == 0 && ev.code == KEY_BACKSPACE => {
                                 if let Some(previous) = input.pending_undo.take() {
                                     complete_undo(&injector, &mut expander, previous);
@@ -240,11 +281,13 @@ fn handle_key_event(
     injector: &Injector,
     input: &mut InputState,
 ) {
+    if input.shortcut_held() {
+        cancel_input_context(expander, input);
+        return;
+    }
+
     if RESET_KEYS.contains(&ev.code) {
-        input.undo = None;
-        input.pending_undo = None;
-        input.pending_expansion = None;
-        expander.reset();
+        cancel_input_context(expander, input);
         return;
     }
 
@@ -268,17 +311,18 @@ fn handle_key_event(
     }
 
     // Use the actual XKB keymap to decode the keypress for any keyboard layout.
-    if let Some(ch) = injector
-        .keymap()
-        .decode(ev.code as u32, input.shift_held, input.altgr_held)
+    if let Some(ch) =
+        injector
+            .keymap()
+            .decode(ev.code as u32, input.shift_held(), input.altgr_held())
     {
         input.undo = None;
         input.pending_undo = None;
         tracing::debug!(
             "key {} (shift={} altgr={}) -> {:?}",
             ev.code,
-            input.shift_held,
-            input.altgr_held,
+            input.shift_held(),
+            input.altgr_held(),
             ch
         );
         if let Some(expansion) = expander.push_char(ch) {
@@ -289,7 +333,16 @@ fn handle_key_event(
             );
             queue_expansion(input, ev.code, expansion);
         }
+    } else {
+        cancel_input_context(expander, input);
     }
+}
+
+fn cancel_input_context(expander: &mut Expander, input: &mut InputState) {
+    input.undo = None;
+    input.pending_undo = None;
+    input.pending_expansion = None;
+    expander.reset();
 }
 
 fn queue_expansion(
@@ -316,7 +369,7 @@ fn complete_pending_expansion(
     if released_code == pending.release_code {
         pending.key_released = true;
     }
-    if !pending.key_released || input.shift_held || input.altgr_held {
+    if !pending.key_released || input.shift_held() || input.altgr_held() {
         return;
     }
     let Some(pending) = input.pending_expansion.take() else {
@@ -368,6 +421,9 @@ fn inject_expansion(
     injector.backspace(expansion.delete_count);
     type_with_fallback(injector, &expansion.text);
     injector.cursor_left(expansion.cursor_back);
+    if let Err(error) = injector.flush() {
+        tracing::error!("Could not finish expansion injection: {}", error);
+    }
     let undo_enabled = config.lock().unwrap().settings.undo_enabled;
     (undo_enabled && expansion.cursor_back == 0 && !expansion.text.contains('\n')).then(|| Undo {
         replacement_len: expansion.text.chars().count(),
@@ -431,5 +487,82 @@ fn log_config_warnings(config: &Config) {
             blocking_source = %warning.blocking_source.display(),
             "Trigger is unreachable in immediate mode because its prefix expands first"
         );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::TriggerMode;
+
+    fn expander(trigger: &str) -> Expander {
+        Expander::new(
+            vec![(trigger.to_string(), "expanded".to_string())],
+            TriggerMode::Immediate,
+        )
+    }
+
+    #[test]
+    fn left_and_right_shift_are_tracked_independently() {
+        let mut input = InputState::default();
+        input.update_modifier(42, 1);
+        input.update_modifier(54, 1);
+        input.update_modifier(42, 0);
+        assert!(input.shift_held());
+        input.update_modifier(54, 0);
+        assert!(!input.shift_held());
+    }
+
+    #[test]
+    fn altgr_is_text_input_not_a_shortcut_modifier() {
+        let mut input = InputState::default();
+        input.update_modifier(100, 1);
+        assert!(input.altgr_held());
+        assert!(!input.shortcut_held());
+    }
+
+    #[test]
+    fn shortcut_cancels_a_partial_trigger() {
+        let mut expander = expander("ac");
+        let mut input = InputState::default();
+        assert!(expander.push_char('a').is_none());
+
+        input.update_modifier(29, 1);
+        cancel_input_context(&mut expander, &mut input);
+        input.update_modifier(29, 0);
+
+        assert!(expander.push_char('c').is_none());
+    }
+
+    #[test]
+    fn cancel_clears_undo_and_pending_expansion_state() {
+        let mut expander = expander("x");
+        let mut input = InputState {
+            undo: Some(Undo {
+                replacement_len: 8,
+                original: ";example".to_string(),
+            }),
+            pending_undo: Some(Undo {
+                replacement_len: 8,
+                original: ";example".to_string(),
+            }),
+            pending_expansion: Some(PendingExpansion {
+                release_code: 45,
+                key_released: false,
+                expansion: crate::expander::Expansion {
+                    delete_count: 1,
+                    text: "expanded".to_string(),
+                    cursor_back: 0,
+                    undo_text: "x".to_string(),
+                },
+            }),
+            ..InputState::default()
+        };
+
+        cancel_input_context(&mut expander, &mut input);
+
+        assert!(input.undo.is_none());
+        assert!(input.pending_undo.is_none());
+        assert!(input.pending_expansion.is_none());
     }
 }

@@ -8,6 +8,8 @@ bottom unless user feedback provides a stronger signal.
 These tasks should come before adding major expansion features.
 
 - [ ] Build a repeatable application compatibility suite.
+  - [x] Establish an isolated, byte-exact Neovim-in-Foot baseline using the
+    real evdev and Wayland injection path.
   - Cover Chromium, Firefox, Zed, terminals, Electron apps, GTK, and Qt.
   - Exercise ASCII, Unicode, multiline text, cursor placement, undo, rapid
     consecutive expansions, and configuration reloads.

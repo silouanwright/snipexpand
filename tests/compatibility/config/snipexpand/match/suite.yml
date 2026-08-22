@@ -1,0 +1,20 @@
+matches:
+  - trigger: ";ascii"
+    replace: "ASCII 123 !?"
+
+  - trigger: ";unicode"
+    replace: "¯\\_(ツ)_/¯ 🧐 café 東京"
+
+  - trigger: ";multi"
+    replace: |-
+      first line
+      second line
+
+  - trigger: ";cursor"
+    replace: "[before $|$ after]"
+
+  - trigger: ";undo"
+    replace: "undo-result"
+
+  - trigger: ";burst"
+    replace: "B"

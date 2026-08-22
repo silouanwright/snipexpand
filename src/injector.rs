@@ -1,11 +1,8 @@
 use anyhow::{Context, Result};
 use evdev::{uinput::VirtualDeviceBuilder, AttributeSet, EventType, InputEvent, Key};
 use std::collections::HashMap;
-use std::io::Read;
-use std::io::Write;
+use std::io::{Read, Seek, SeekFrom, Write};
 use std::os::fd::AsFd;
-use std::os::fd::IntoRawFd;
-use std::os::unix::io::FromRawFd;
 use std::sync::mpsc;
 use std::sync::{
     atomic::{AtomicU64, Ordering},
@@ -14,7 +11,7 @@ use std::sync::{
 use std::thread;
 use wayland_client::{
     protocol::{wl_keyboard, wl_registry, wl_seat},
-    Connection, Dispatch, QueueHandle,
+    Connection, Dispatch, QueueHandle, WEnum,
 };
 use wayland_protocols_misc::zwp_virtual_keyboard_v1::client::{
     zwp_virtual_keyboard_manager_v1::ZwpVirtualKeyboardManagerV1,
@@ -393,6 +390,10 @@ trait KeyboardTransport {
     fn send_text(&mut self, _text: &str, _delay_ms: u64) -> Result<()> {
         anyhow::bail!("text injection is unsupported by this backend")
     }
+
+    fn flush(&mut self) -> Result<()> {
+        Ok(())
+    }
 }
 
 struct UinputKeyboard {
@@ -567,7 +568,17 @@ impl KeyboardTransport for WaylandKeyboard {
                 std::thread::sleep(std::time::Duration::from_millis(delay_ms));
             }
         }
-        self.connection.flush().context("flush Wayland text")
+        self.connection
+            .roundtrip()
+            .context("wait for Wayland text dispatch")?;
+        Ok(())
+    }
+
+    fn flush(&mut self) -> Result<()> {
+        self.connection
+            .roundtrip()
+            .context("wait for Wayland key dispatch")?;
+        Ok(())
     }
 }
 
@@ -739,6 +750,9 @@ fn injection_thread(
                 let _ = done.send(result);
             }
             InjectionCmd::Flush(done) => {
+                if let Err(error) = keyboard.flush() {
+                    tracing::error!("{name} flush error: {error}");
+                }
                 let _ = done.send(());
             }
             InjectionCmd::Key { code, value } => {
@@ -770,6 +784,21 @@ struct WaylandKeymapState {
     keymap_sent: bool,
 }
 
+fn read_wayland_keymap(fd: std::os::fd::OwnedFd, size: u32) -> Result<String> {
+    const MAX_KEYMAP_SIZE: u32 = 16 * 1024 * 1024;
+    if size == 0 || size > MAX_KEYMAP_SIZE {
+        anyhow::bail!("invalid Wayland keymap size {size}");
+    }
+    let mut file = std::fs::File::from(fd);
+    file.seek(SeekFrom::Start(0))?;
+    let mut bytes = vec![0; size as usize];
+    file.read_exact(&mut bytes)?;
+    while bytes.last() == Some(&0) {
+        bytes.pop();
+    }
+    String::from_utf8(bytes).context("Wayland keymap was not UTF-8")
+}
+
 fn wayland_keymap_thread(keymap_tx: mpsc::Sender<KeymapData>) -> Result<()> {
     let conn = Connection::connect_to_env()
         .context("Failed to connect to Wayland display (WAYLAND_DISPLAY not set?)")?;
@@ -791,9 +820,16 @@ fn wayland_keymap_thread(keymap_tx: mpsc::Sender<KeymapData>) -> Result<()> {
         anyhow::bail!("No wl_seat in compositor globals");
     };
 
-    // Requesting keyboard causes the compositor to immediately send wl_keyboard.keymap.
-    seat.get_keyboard(&qh, ());
-    event_queue.roundtrip(&mut state)?;
+    // Requesting a keyboard normally causes the compositor to immediately send
+    // wl_keyboard.keymap. Retry transient empty or malformed startup maps.
+    for _ in 0..3 {
+        seat.get_keyboard(&qh, ());
+        event_queue.roundtrip(&mut state)?;
+        if state.keymap_sent {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(25));
+    }
 
     if !state.keymap_sent {
         anyhow::bail!("Compositor did not send a keyboard keymap");
@@ -846,32 +882,31 @@ impl Dispatch<wl_keyboard::WlKeyboard, ()> for WaylandKeymapState {
         _: &Connection,
         _: &QueueHandle<Self>,
     ) {
-        if let wl_keyboard::Event::Keymap {
-            format: _,
-            fd,
-            size,
-        } = event
-        {
+        if let wl_keyboard::Event::Keymap { format, fd, size } = event {
             if state.keymap_sent {
                 return;
             }
-            let keymap_str = {
-                let mut file = unsafe { std::fs::File::from_raw_fd(fd.into_raw_fd()) };
-                let mut s = String::with_capacity(size as usize);
-                if let Err(error) = (&mut file).take(size as u64).read_to_string(&mut s) {
+            if format != WEnum::Value(wl_keyboard::KeymapFormat::XkbV1) {
+                tracing::warn!(?format, "Ignoring unsupported Wayland keymap format");
+                return;
+            }
+            let keymap_str = match read_wayland_keymap(fd, size) {
+                Ok(value) => value,
+                Err(error) => {
                     tracing::warn!("Failed to read Wayland keymap: {}", error);
+                    return;
                 }
-                // Wayland sends the keymap with a null terminator; strip it before
-                // passing to xkbcommon which uses CString internally.
-                s.trim_end_matches('\0').to_string()
             };
-            let mut data = KeymapData {
+            let data = KeymapData {
                 lookup: KeymapLookup::build(&keymap_str),
                 text: keymap_str,
             };
             if data.lookup.table.is_empty() {
-                tracing::warn!("Wayland keymap was unusable; falling back to system default");
-                data = KeymapLookup::build_default_data();
+                tracing::warn!(
+                    size,
+                    "Ignoring unusable Wayland keymap and waiting for another"
+                );
+                return;
             }
             if let Some(tx) = state.keymap_tx.take() {
                 let _ = tx.send(data);
@@ -884,6 +919,7 @@ impl Dispatch<wl_keyboard::WlKeyboard, ()> for WaylandKeymapState {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::os::fd::OwnedFd;
 
     #[test]
     fn persistent_text_keymap_has_level_zero_unicode() {
@@ -904,5 +940,15 @@ mod tests {
             assert!(SAFE_TEXT_CODES.contains(&codes[&character]));
             assert_eq!(lookup.lookup(character).unwrap().level, 0);
         }
+    }
+
+    #[test]
+    fn wayland_keymap_reader_ignores_the_inherited_fd_offset() {
+        let mut file = tempfile::tempfile().unwrap();
+        file.write_all(b"test keymap\0").unwrap();
+        let size = file.metadata().unwrap().len() as u32;
+        let fd: OwnedFd = file.into();
+
+        assert_eq!(read_wayland_keymap(fd, size).unwrap(), "test keymap");
     }
 }

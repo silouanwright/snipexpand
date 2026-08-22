@@ -1,0 +1,8 @@
+trigger_mode: space
+terminators: [space]
+injection_backend: auto
+injection_delay_ms: 1
+wayland_injection_delay_ms: 0
+uinput_injection_delay_ms: 1
+injection_settle_ms: 10
+undo_enabled: true
