@@ -191,20 +191,15 @@ install                          Install and start the user service
 - Application exclusions operate at the application level. Wayland does not
   expose a browser's focused field type, so SnipExpand cannot automatically
   identify password fields inside an allowed browser.
-
-See the [compatibility matrix](docs/compatibility.md) for the complete supported
-configuration surface.
-
-## Security
-
-SnipExpand reads global keyboard events through Linux input devices, including
-sensitive input. Install only binaries you trust.
-
-Application exclusions prevent expansion in matching applications, but they do
-not stop the daemon from receiving keyboard events.
+- SnipExpand reads global keyboard events, including sensitive input.
+  Application exclusions stop expansion but do not stop the daemon from
+  receiving those events. Install only binaries you trust.
 
 SnipExpand does not execute snippets, access the clipboard, or contact online
 services.
+
+See the [compatibility matrix](docs/compatibility.md) for the complete supported
+configuration surface.
 
 ## Documentation
 
