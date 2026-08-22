@@ -41,6 +41,8 @@ enum Cmd {
     },
     /// Initialize configuration and install the systemd user service
     Install,
+    /// Stop and remove the user service while preserving configuration
+    Uninstall,
 }
 
 fn main() -> anyhow::Result<()> {
@@ -165,6 +167,9 @@ fn handle_cmd(cmd: Cmd) -> anyhow::Result<()> {
 
         Cmd::Install => {
             install_service()?;
+        }
+        Cmd::Uninstall => {
+            uninstall_service()?;
         }
     }
     Ok(())
@@ -337,61 +342,21 @@ fn daemon_status() -> anyhow::Result<ipc::DaemonStatus> {
 }
 
 fn install_service() -> anyhow::Result<()> {
-    // Find the binary path
     let binary = std::env::current_exe()?;
-
-    // Build service file content
-    let service = format!(
-        r#"[Unit]
-Description=SnipExpand Wayland text expander
-Documentation=https://github.com/silouanwright/snipexpand
-After=graphical-session.target
-
-[Service]
-Type=simple
-ExecStart={}
-Restart=on-failure
-RestartSec=2s
-StandardOutput=journal
-StandardError=journal
-
-[Install]
-WantedBy=graphical-session.target
-"#,
-        binary.display()
-    );
-
-    // Write service file
-    let service_dir = {
-        let config_home = match std::env::var("XDG_CONFIG_HOME") {
-            Ok(v) => std::path::PathBuf::from(v),
-            Err(_) => {
-                let home = std::env::var("HOME")
-                    .map_err(|_| anyhow::anyhow!("HOME environment variable is not set"))?;
-                std::path::PathBuf::from(home).join(".config")
-            }
-        };
-        config_home.join("systemd").join("user")
-    };
-    std::fs::create_dir_all(&service_dir)?;
-    let service_path = service_dir.join("snipexpand.service");
+    let service = service_definition(&binary);
+    let service_path = service_path()?;
+    let service_dir = service_path
+        .parent()
+        .ok_or_else(|| anyhow::anyhow!("systemd user service path has no parent"))?;
+    std::fs::create_dir_all(service_dir)?;
     std::fs::write(&service_path, &service)?;
-    println!("Wrote: {:?}", service_path);
+    println!("Wrote: {}", service_path.display());
 
-    // Enable and start the service
-    let status = std::process::Command::new("systemctl")
-        .args(["--user", "daemon-reload"])
-        .status()?;
-    if !status.success() {
-        anyhow::bail!("systemctl daemon-reload failed");
-    }
-
-    let status = std::process::Command::new("systemctl")
-        .args(["--user", "enable", "--now", "snipexpand"])
-        .status()?;
-    if !status.success() {
-        anyhow::bail!("systemctl enable --now snipexpand failed");
-    }
+    run_systemctl(&["daemon-reload"])?;
+    run_systemctl(&["enable", "snipexpand.service"])?;
+    // `enable --now` does not restart an already active service. An explicit
+    // restart guarantees that upgrades run the invoking binary.
+    run_systemctl(&["restart", "snipexpand.service"])?;
 
     println!("SnipExpand service installed and started.");
     if !in_group("input") {
@@ -401,4 +366,86 @@ WantedBy=graphical-session.target
         println!("  # Then log out and back in");
     }
     Ok(())
+}
+
+fn service_definition(binary: &std::path::Path) -> String {
+    let binary = binary
+        .to_string_lossy()
+        .replace('\\', "\\\\")
+        .replace('"', "\\\"")
+        .replace('%', "%%");
+    format!(
+        r#"[Unit]
+Description=SnipExpand Wayland text expander
+Documentation=https://github.com/silouanwright/snipexpand
+After=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart="{}"
+Restart=on-failure
+RestartSec=2s
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=graphical-session.target
+"#,
+        binary
+    )
+}
+
+fn service_path() -> anyhow::Result<std::path::PathBuf> {
+    let config_home = match std::env::var("XDG_CONFIG_HOME") {
+        Ok(value) => std::path::PathBuf::from(value),
+        Err(_) => {
+            let home = std::env::var("HOME")
+                .map_err(|_| anyhow::anyhow!("HOME environment variable is not set"))?;
+            std::path::PathBuf::from(home).join(".config")
+        }
+    };
+    Ok(config_home
+        .join("systemd")
+        .join("user")
+        .join("snipexpand.service"))
+}
+
+fn run_systemctl(arguments: &[&str]) -> anyhow::Result<()> {
+    let status = std::process::Command::new("systemctl")
+        .arg("--user")
+        .args(arguments)
+        .status()?;
+    if !status.success() {
+        anyhow::bail!("systemctl --user {} failed", arguments.join(" "));
+    }
+    Ok(())
+}
+
+fn uninstall_service() -> anyhow::Result<()> {
+    let service_path = service_path()?;
+    if service_path.exists() {
+        run_systemctl(&["disable", "--now", "snipexpand.service"])?;
+    }
+    if service_path.exists() {
+        std::fs::remove_file(&service_path)?;
+        println!("Removed: {}", service_path.display());
+    } else {
+        println!("SnipExpand user service was already removed.");
+    }
+    run_systemctl(&["daemon-reload"])?;
+    println!("SnipExpand service removed. Configuration was preserved.");
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn service_uses_the_invoking_binary_and_restarts_on_failure() {
+        let definition = service_definition(std::path::Path::new("/tmp/Snip Expand/%i/bin"));
+        assert!(definition.contains("ExecStart=\"/tmp/Snip Expand/%%i/bin\""));
+        assert!(definition.contains("Restart=on-failure"));
+        assert!(definition.contains("WantedBy=graphical-session.target"));
+    }
 }

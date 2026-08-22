@@ -14,7 +14,7 @@ These tasks should come before adding major expansion features.
   - Exercise ASCII, Unicode, multiline text, cursor placement, undo, rapid
     consecutive expansions, and configuration reloads.
   - Record known application-specific timing overrides as fixtures.
-- [ ] Make upgrades and removal first-class.
+- [x] Make upgrades and removal first-class.
   - Add `snipexpand uninstall` for the user service and generated service file.
   - Ensure `snipexpand install` replaces and restarts an older running daemon.
   - Document which user configuration remains after uninstalling.

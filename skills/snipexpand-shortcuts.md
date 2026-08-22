@@ -17,6 +17,9 @@ match files, trigger behavior, or application exclusions.
 - CLI-managed matches: `~/.config/snipexpand/match/generated.yml`
 - Service: `snipexpand.service`
 
+`snipexpand uninstall` removes the user service but preserves all settings and
+match files.
+
 ## Safety and editing rules
 
 1. Read the current state with `snipexpand list` and validate it with
