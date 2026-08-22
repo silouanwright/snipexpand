@@ -170,13 +170,6 @@ snipexpand doctor                Diagnose setup and runtime requirements
 snipexpand install               Install and start the user service
 ```
 
-Useful service commands:
-
-```bash
-systemctl --user status snipexpand
-journalctl --user -u snipexpand -f
-```
-
 ## Undo
 
 Press Backspace immediately after a plain, single-line expansion to restore its
