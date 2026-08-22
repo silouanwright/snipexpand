@@ -34,8 +34,8 @@ a package registry. See the [compatibility matrix](docs/compatibility.md).
 ## Why SnipExpand?
 
 Text expansion on Omarchy and Hyprland is still unreliable or awkward.
-SnipExpand was built specifically to work well there. [Compare it with the
-alternatives](#alternatives).
+SnipExpand was built specifically to work well there. Compare it with the
+alternatives below.
 
 ## Alternatives
 
