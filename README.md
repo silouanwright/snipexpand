@@ -12,11 +12,9 @@ Fast, config-based text expansion for Linux and Wayland. **First-class support f
   </a>
 </p>
 
-Define a trigger such as `;mail`, then use it across applications. SnipExpand
-types the replacement directly, without the clipboard or editor plugins.
-
 ## Features
 
+- System-wide, clipboard-free expansion
 - Immediate or terminator-based expansion
 - Plain text and multiline replacements
 - Cursor placement with `$|$`
