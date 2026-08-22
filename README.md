@@ -127,7 +127,7 @@ matches:
 
 ## Settings
 
-Global settings live in `~/.config/snipexpand/config.yml`:
+Edit `~/.config/snipexpand/config.yml`:
 
 ```yaml
 # Choose when expansion happens.
