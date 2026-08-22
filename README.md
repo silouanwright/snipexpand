@@ -34,7 +34,7 @@ See the [compatibility matrix](docs/compatibility.md) for exact details.
 | Project | Best fit | What SnipExpand provides differently |
 | --- | --- | --- |
 | [Espanso](https://espanso.org) | Cross-platform automation, forms, scripts, and packages | A smaller surface focused on reliable Wayland input and injection |
-| [Texpand](https://github.com/Ghishadow/texpand) | Lightweight Wayland text expansion | Strict YAML validation, application exclusions, diagnostics, and a managed user service |
+| [Texpand](https://github.com/Ghishadow/texpand) | Lightweight Wayland text expansion | A native Rust implementation, strict YAML validation, application exclusions, diagnostics, and a managed user service |
 | [SKRT](https://github.com/aaaorg/skrt) | Minimal Rust-based expansion | Espanso-style YAML, multiline matches, cursor placement, automatic reload, and broader runtime tooling |
 | SnipExpand | Omarchy, Hyprland, and config-based Wayland expansion | Persistent Wayland injection, a tested `uinput` fallback, and first-class Omarchy defaults |
 
