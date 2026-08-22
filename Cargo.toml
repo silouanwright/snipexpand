@@ -31,7 +31,6 @@ wayland-protocols-misc = { version = "0.3", features = ["client"] }
 xkbcommon = "0.7"
 
 # Config
-toml = "0.8"
 serde = { version = "1", features = ["derive"] }
 serde-saphyr = "1.1"
 serde_json = "1"

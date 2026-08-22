@@ -39,12 +39,13 @@ enum Cmd {
         #[arg(long)]
         json: bool,
     },
-    /// Install and enable systemd user service
+    /// Initialize configuration and install the systemd user service
     Install,
 }
 
 fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
+    ensure_config()?;
     match cli.command {
         None => {
             // Daemon mode: run the tokio event loop
@@ -97,9 +98,6 @@ fn handle_cmd(cmd: Cmd) -> anyhow::Result<()> {
                     .sum::<usize>(),
                 cfg.loaded_files.len()
             );
-            if cfg.legacy_loaded {
-                println!("Legacy expansions.toml is active; YAML matches are also supported.");
-            }
             print_config_warnings(&cfg);
         }
 
@@ -200,6 +198,31 @@ fn init_config() -> anyhow::Result<()> {
     )?;
     config::Config::load_default()?;
     println!("Configuration ready at {}", dir.display());
+    Ok(())
+}
+
+fn ensure_config() -> anyhow::Result<()> {
+    let dir = config::Config::dir();
+    let fresh = !dir.exists();
+    let match_dir = config::Config::match_dir();
+    std::fs::create_dir_all(&match_dir)?;
+
+    let settings = dir.join("config.yml");
+    if !settings.exists() {
+        write_new(
+            &settings,
+            "trigger_mode: space\nterminators: [space]\ninjection_backend: auto\ninjection_delay_ms: 1\nwayland_injection_delay_ms: 0\nuinput_injection_delay_ms: 1\ninjection_settle_ms: 10\n",
+        )?;
+    }
+
+    if fresh {
+        let matches = match_dir.join("base.yml");
+        write_new(
+            &matches,
+            "matches:\n  - trigger: \";hello\"\n    replace: \"Hello from SnipExpand!\"\n",
+        )?;
+    }
+
     Ok(())
 }
 
@@ -366,9 +389,11 @@ WantedBy=graphical-session.target
     }
 
     println!("SnipExpand service installed and started.");
-    println!();
-    println!("IMPORTANT: You still need to join the 'input' group (requires re-login):");
-    println!("  sudo usermod -a -G input $USER");
-    println!("  # Then log out and back in");
+    if !in_group("input") {
+        println!();
+        println!("Input-device access still needs permission:");
+        println!("  sudo usermod -a -G input $USER");
+        println!("  # Then log out and back in");
+    }
     Ok(())
 }

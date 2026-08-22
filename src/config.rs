@@ -209,7 +209,6 @@ pub struct Config {
     pub settings: Settings,
     pub matches: Vec<Match>,
     pub loaded_files: Vec<PathBuf>,
-    pub legacy_loaded: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -249,15 +248,6 @@ struct MatchDefinition {
     propagate_case: bool,
     #[serde(default, skip_serializing_if = "is_default_uppercase_style")]
     uppercase_style: UppercaseStyle,
-}
-
-#[derive(Debug, Default, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct LegacyConfig {
-    #[serde(default)]
-    settings: Settings,
-    #[serde(default)]
-    expansions: HashMap<String, String>,
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]
@@ -300,33 +290,6 @@ impl Config {
 
     pub fn load_dir(dir: &Path) -> Result<Self> {
         let mut config = Self::default();
-        let legacy_path = dir.join("expansions.toml");
-        if legacy_path.exists() {
-            let content = std::fs::read_to_string(&legacy_path)
-                .with_context(|| format!("read {}", legacy_path.display()))?;
-            let legacy: LegacyConfig = toml::from_str(&content)
-                .with_context(|| format!("parse legacy config {}", legacy_path.display()))?;
-            config.settings = legacy.settings;
-            config.matches.extend(
-                legacy
-                    .expansions
-                    .into_iter()
-                    .map(|(trigger, replace)| Match {
-                        triggers: vec![trigger],
-                        replace,
-                        vars: Vec::new(),
-                        word: false,
-                        left_word: false,
-                        right_word: false,
-                        propagate_case: false,
-                        uppercase_style: UppercaseStyle::Uppercase,
-                        source: legacy_path.clone(),
-                    }),
-            );
-            config.loaded_files.push(legacy_path);
-            config.legacy_loaded = true;
-        }
-
         let settings_path = dir.join("config.yml");
         if settings_path.exists() {
             let content = std::fs::read_to_string(&settings_path)
@@ -722,23 +685,6 @@ matches:
             .unwrap_err()
             .to_string()
             .contains("requires propagate_case: true"));
-    }
-
-    #[test]
-    fn loads_legacy_toml_alongside_yaml() {
-        let dir = TempDir::new().unwrap();
-        write(
-            &dir.path().join("expansions.toml"),
-            "[settings]\ntrigger_mode = 'space'\n[expansions]\n'/old' = 'legacy'\n",
-        );
-        write(
-            &dir.path().join("match/new.yml"),
-            "matches:\n  - trigger: ';new'\n    replace: 'yaml'\n",
-        );
-        let config = Config::load_dir(dir.path()).unwrap();
-        assert!(config.legacy_loaded);
-        assert_eq!(config.settings.trigger_mode, TriggerMode::Space);
-        assert_eq!(config.matches.len(), 2);
     }
 
     #[test]

@@ -15,7 +15,6 @@ match files, trigger behavior, or application exclusions.
 - Settings: `~/.config/snipexpand/config.yml`
 - Handwritten matches: `~/.config/snipexpand/match/**/*.yml` or `*.yaml`
 - CLI-managed matches: `~/.config/snipexpand/match/generated.yml`
-- Legacy configuration: `~/.config/snipexpand/expansions.toml`
 - Service: `snipexpand.service`
 
 ## Safety and editing rules

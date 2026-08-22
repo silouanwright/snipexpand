@@ -34,7 +34,6 @@ journalctl --user -u snipexpand -f
 
 - settings: `~/.config/snipexpand/config.yml`
 - matches: `~/.config/snipexpand/match/**/*.yml` (`.yaml` also supported)
-- legacy config: `~/.config/snipexpand/expansions.toml`
 - IPC socket: `$XDG_RUNTIME_DIR/snipexpand.sock`
 - user service: `~/.config/systemd/user/snipexpand.service`
 

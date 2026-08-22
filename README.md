@@ -100,19 +100,14 @@ Debian or Ubuntu, or `libxkbcommon` and `wayland` on Arch Linux.
 ## Set up
 
 ```bash
-snipexpand init
-sudo usermod -a -G input "$USER"
-```
-
-Log out and back in so the group change reaches your graphical session. Then
-install and start the systemd user service:
-
-```bash
 snipexpand install
 snipexpand doctor
 ```
 
-The service starts immediately and is enabled for future graphical sessions.
+SnipExpand creates missing starter configuration on first use without
+overwriting existing files. The install command starts the service and enables
+it for future graphical sessions. If `doctor` reports missing input-device
+access, follow the permission command it provides and log out and back in once.
 
 ## Hot reloading
 
@@ -194,7 +189,7 @@ class, and executable values needed for an exclusion.
 
 ```text
 snipexpand                       Run the daemon in the foreground
-snipexpand init                  Create starter configuration
+snipexpand init                  Explicitly create starter configuration
 snipexpand add TRIGGER TEXT      Add or replace a generated expansion
 snipexpand remove TRIGGER        Remove a generated expansion
 snipexpand list                  List triggers and source files
@@ -236,7 +231,6 @@ modify the clipboard.
 ## Documentation
 
 - [Espanso compatibility](docs/compatibility.md)
-- [Legacy TOML migration](docs/migration.md)
 - [Roadmap](docs/espanso-roadmap.md)
 
 ## Development
