@@ -1,8 +1,7 @@
 # SnipExpand
 
-SnipExpand is a fast, config-based text expander for Linux and Wayland. It was
-built for a reliable, native experience on [Omarchy](https://omarchy.org) and
-Hyprland.
+SnipExpand is a fast, config-based text expander for Linux and Wayland, with
+first-class support for [Omarchy](https://omarchy.org) and Hyprland.
 
 [![CI](https://github.com/silouanwright/snipexpand/actions/workflows/ci.yml/badge.svg)](https://github.com/silouanwright/snipexpand/actions/workflows/ci.yml)
 [![Release](https://github.com/silouanwright/snipexpand/actions/workflows/release.yml/badge.svg)](https://github.com/silouanwright/snipexpand/actions/workflows/release.yml)
