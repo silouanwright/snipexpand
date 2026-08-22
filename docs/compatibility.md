@@ -31,10 +31,10 @@ than silently changing their behavior.
 trigger_mode: immediate # or space
 terminators: [space]    # any combination of space, enter, tab
 injection_backend: auto # auto, wayland, or uinput; restart after changing
-injection_delay_ms: 1   # 0–50; shared fallback
+injection_delay_ms: 1   # 0 to 50; shared fallback
 wayland_injection_delay_ms: 0 # tested Omarchy/Hyprland default
 uinput_injection_delay_ms: 1  # optional backend-specific override
-injection_settle_ms: 10 # 0–100; one-time pause before trigger deletion
+injection_settle_ms: 10 # 0 to 100; one-time pause before trigger deletion
 undo_enabled: true      # immediate Backspace restores a plain expansion's trigger
 app_exclusions:         # regex filters; entries are OR, fields are AND
   - class: "^1Password$"

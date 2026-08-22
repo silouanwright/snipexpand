@@ -1,8 +1,8 @@
 # Espanso-informed roadmap
 
 This roadmap is based on an architectural review of Espanso at commit
-`fb3f825` (2026-08-14). Espanso is GPL-3.0 and SnipExpand is MIT, so this is a
-behavioral and architectural study, not a code-porting plan.
+`fb3f825` (2026-08-14). This is a behavioral and architectural study, not a
+code-porting plan.
 
 ## What Espanso's architecture gets right
 

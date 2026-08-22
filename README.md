@@ -10,7 +10,25 @@ clipboard or requiring editor-specific plugins.
 
 [![CI](https://github.com/silouanwright/snipexpand/actions/workflows/ci.yml/badge.svg)](https://github.com/silouanwright/snipexpand/actions/workflows/ci.yml)
 [![Release](https://github.com/silouanwright/snipexpand/actions/workflows/release.yml/badge.svg)](https://github.com/silouanwright/snipexpand/actions/workflows/release.yml)
-[![License: MIT](https://img.shields.io/badge/license-MIT-yellow.svg)](LICENSE)
+[![License: GPL v3+](https://img.shields.io/badge/license-GPLv3%2B-blue.svg)](LICENSE)
+
+## Why SnipExpand?
+
+SnipExpand is built around one job: dependable text expansion on Omarchy and
+Hyprland. It captures input through Linux input devices and keeps a native
+Wayland virtual keyboard open for fast, clipboard-free expansion. Unlike tools
+that launch an injector for each replacement or paste through the clipboard,
+the normal expansion path is persistent and can run with no per-character
+delay.
+
+Configuration remains ordinary YAML that can be searched, reviewed, backed up,
+and versioned with Git. SnipExpand reloads it automatically, rejects unsupported
+configuration instead of silently ignoring it, and provides commands for
+validation, application detection, status, and setup diagnostics.
+
+The daemon does not execute commands from snippets, contact online services, or
+read and replace clipboard contents. Its focused scope keeps the
+security-sensitive input path smaller and easier to audit.
 
 ## Features
 
@@ -34,9 +52,11 @@ See the [compatibility matrix](docs/compatibility.md) for exact details.
 | Project | Strengths | Why choose SnipExpand instead |
 | --- | --- | --- |
 | [Espanso](https://espanso.org) | Mature, cross-platform automation with forms, scripts, and packages | First-class Omarchy and Hyprland support, built and tested around reliable Wayland input and injection where Espanso can be unreliable |
-| [Taurine](https://github.com/ereinaimer/taurine) | Cross-platform Rust automation with a TUI, regex, scripts, conversions, and optional AI | MIT licensing, plain YAML configuration, a narrower local-only scope, and first-class Omarchy defaults |
+| [Taurine](https://github.com/ereinaimer/taurine) | Broad cross-platform Rust automation with a TUI, regex, scripts, conversions, and optional AI | GPL-licensed open source, Git-friendly YAML, persistent clipboard-free Wayland injection, and a smaller local-only security surface |
+| [FlitKey](https://github.com/swarajnandedkar/FlitKey) | A Python and PyQt graphical expander with hotkeys, a picker, imports, and expansion packs | Actual typed expansion on Wayland instead of a copy-and-paste picker, plus automatic YAML reload and no Python GUI runtime |
 | [AutoKey for Wayland](https://github.com/dlk3/autokey-wayland) | Mature GUI automation and Python scripting | Hyprland support, a native Rust daemon, and no Python or desktop-extension runtime; AutoKey's Wayland fork currently supports GNOME only |
 | [Texpand](https://github.com/andresousadotpt/texpand) | Lightweight Go-based Wayland expansion with YAML configuration and cursor placement | A native Rust implementation, persistent Wayland injection, strict validation, application exclusions, diagnostics, and service management |
+| [text-expander-wayland](https://github.com/quantavil/text-expander-wayland) | A small Rust expander with Espanso-style YAML, dynamic variables, and optional AI | A persistent injector instead of per-operation `wtype` or `ydotool`, automatic reload, layout-aware input, an unprivileged user service, and stricter diagnostics |
 | [SRKT](https://github.com/aaaorg/srkt) | A small Rust foundation for Wayland text expansion | Espanso-style YAML, multiline matches, cursor placement, automatic reload, application exclusions, validation, and broader runtime tooling |
 
 ## Requirements
@@ -217,4 +237,6 @@ cargo test
 
 ## License
 
-[MIT](LICENSE)
+[GNU General Public License v3.0 or later](LICENSE). Distributed modifications
+must remain open source under GPL-compatible terms. Private use and modification
+do not require publishing source code.

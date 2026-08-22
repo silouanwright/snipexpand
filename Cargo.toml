@@ -1,9 +1,9 @@
 [package]
 name = "snipexpand"
-version = "0.1.1"
+version = "0.1.2"
 edition = "2021"
-description = "Wayland-native text expander via evdev + uinput"
-license = "MIT"
+description = "Fast, config-based text expansion for Linux and Wayland"
+license = "GPL-3.0-or-later"
 repository = "https://github.com/silouanwright/snipexpand"
 keywords = ["wayland", "text-expander", "evdev", "uinput", "linux"]
 categories = ["command-line-utilities"]

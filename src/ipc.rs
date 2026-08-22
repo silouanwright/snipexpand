@@ -141,7 +141,7 @@ mod tests {
     fn daemon_status_round_trips_as_json() {
         let status = DaemonStatus {
             running: true,
-            version: "0.1.1".to_string(),
+            version: env!("CARGO_PKG_VERSION").to_string(),
             pid: 42,
             injection_backend: "wayland".to_string(),
             match_groups: 3,
