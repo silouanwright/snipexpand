@@ -205,8 +205,9 @@ configuration surface.
 
 ## Documentation
 
+- [Prioritized tasks](TASKS.md)
 - [Espanso compatibility](docs/compatibility.md)
-- [Roadmap](docs/espanso-roadmap.md)
+- [Espanso-informed design notes](docs/espanso-roadmap.md)
 
 ## Development
 
