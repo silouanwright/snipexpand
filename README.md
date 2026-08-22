@@ -39,7 +39,7 @@ alternatives below.
 
 | Project | Strengths | Why choose SnipExpand instead |
 | --- | --- | --- |
-| [Espanso](https://espanso.org) | Cross-platform automation, forms, scripts, and packages | A reliable native Wayland path built for Omarchy and Hyprland |
+| [Espanso](https://espanso.org) | Cross-platform automation, forms, scripts, and packages | Built for Omarchy and Hyprland; Espanso has documented Linux and Wayland issues with [application compatibility](https://github.com/espanso/espanso/issues/2162), [startup reliability](https://github.com/espanso/espanso/issues/2223), and [expansions stopping over time](https://github.com/espanso/espanso/issues/2423) |
 | [Taurine](https://github.com/ereinaimer/taurine) | Cross-platform Rust automation with scripts, conversions, and optional AI | A local-only core, YAML configuration, persistent Wayland injection, and GPL licensing |
 | [FlitKey](https://github.com/swarajnandedkar/FlitKey) | A graphical picker with hotkeys, imports, and expansion packs | Typed Wayland expansion instead of copy and paste, with no Python GUI runtime |
 | [AutoKey for Wayland](https://github.com/dlk3/autokey-wayland) | GUI automation and Python scripting | Hyprland support and a native Rust daemon; AutoKey's Wayland fork targets GNOME |
