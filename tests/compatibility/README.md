@@ -75,3 +75,14 @@ override needed.
 Browser and GUI-editor adapters still need a reliable way to extract their
 final text for byte-exact comparison. Do not mark a target as passing based
 only on visual inspection.
+
+## Unicode hot reload
+
+To verify that a newly added Unicode character joins the persistent Wayland
+keymap without restarting the daemon, start the isolated daemon before copying
+`reload/after.yml` into its `match/` directory. Type `;fresh`, save the target,
+and compare it byte-for-byte with `reload/expected.txt`. The crab character is
+deliberately absent from the startup fixture.
+
+Result: Pass on Hyprland with the Wayland backend. The refreshed keymap handled
+the new character directly without invoking the Unicode fallback.

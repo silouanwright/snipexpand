@@ -23,7 +23,7 @@ These tasks should come before adding major expansion features.
   - Ensure installation, input-group access, service setup, upgrade, and removal
     behave naturally on Omarchy and Arch Linux.
   - Keep Cargo and direct binary installation available.
-- [ ] Rebuild the persistent Unicode keymaps after a configuration reload.
+- [x] Rebuild the persistent Unicode keymaps after a configuration reload.
   - Newly added Unicode snippets should not require a daemon restart or
     temporarily fall back to `wtype`.
   - Add regression coverage for adding and removing Unicode while running.

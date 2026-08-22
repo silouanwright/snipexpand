@@ -458,9 +458,14 @@ fn wayland_text_characters(config: &Config) -> String {
 fn reload_config(config: &Arc<Mutex<Config>>, expander: &mut Expander, injector: &Injector) {
     match Config::load_default() {
         Ok(new_cfg) => {
-            if new_cfg.settings.injection_backend
-                != config.lock().unwrap().settings.injection_backend
-            {
+            let (backend_changed, text_characters_changed) = {
+                let current = config.lock().unwrap();
+                (
+                    new_cfg.settings.injection_backend != current.settings.injection_backend,
+                    wayland_text_characters(&new_cfg) != wayland_text_characters(&current),
+                )
+            };
+            if backend_changed {
                 tracing::warn!("injection_backend changes require a daemon restart");
             }
             expander.update_configured(
@@ -470,6 +475,13 @@ fn reload_config(config: &Arc<Mutex<Config>>, expander: &mut Expander, injector:
             );
             injector.set_delay_ms(new_cfg.settings.injection_delay_for(injector.backend()));
             injector.set_settle_ms(new_cfg.settings.injection_settle_ms);
+            if text_characters_changed {
+                if let Err(error) =
+                    injector.refresh_wayland_text_keymap(wayland_text_characters(&new_cfg))
+                {
+                    tracing::warn!("Could not refresh the Wayland Unicode keymap: {}", error);
+                }
+            }
             *config.lock().unwrap() = new_cfg;
             log_config_warnings(&config.lock().unwrap());
             tracing::info!("Config reloaded");

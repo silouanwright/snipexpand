@@ -1,0 +1,3 @@
+matches:
+  - trigger: ";fresh"
+    replace: "reloaded 🦀"

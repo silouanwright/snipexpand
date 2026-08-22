@@ -152,6 +152,10 @@ enum InjectionCmd {
         text: String,
         done: mpsc::Sender<std::result::Result<(), String>>,
     },
+    RefreshTextKeymap {
+        characters: String,
+        done: mpsc::Sender<std::result::Result<(), String>>,
+    },
     Flush(mpsc::Sender<()>),
 }
 
@@ -343,6 +347,20 @@ impl Injector {
             .map_err(anyhow::Error::msg)
     }
 
+    pub fn refresh_wayland_text_keymap(&self, characters: String) -> Result<()> {
+        if self.backend != "wayland" {
+            return Ok(());
+        }
+        let (done, result) = mpsc::channel();
+        self.tx
+            .send(InjectionCmd::RefreshTextKeymap { characters, done })
+            .context("Wayland injection thread stopped")?;
+        result
+            .recv_timeout(std::time::Duration::from_secs(2))
+            .context("timed out refreshing Wayland text keymap")?
+            .map_err(anyhow::Error::msg)
+    }
+
     /// Last-resort compositor injection when the persistent startup text
     /// keymaps do not contain a newly configured character.
     pub fn type_unicode(&self, text: &str) -> Result<()> {
@@ -394,6 +412,10 @@ trait KeyboardTransport {
     fn flush(&mut self) -> Result<()> {
         Ok(())
     }
+
+    fn refresh_text_keymap(&mut self, _characters: &str) -> Result<()> {
+        Ok(())
+    }
 }
 
 struct UinputKeyboard {
@@ -435,6 +457,9 @@ struct VirtualKeyboardState {
 
 struct WaylandKeyboard {
     connection: Connection,
+    queue_handle: QueueHandle<VirtualKeyboardState>,
+    seat: wl_seat::WlSeat,
+    manager: ZwpVirtualKeyboardManagerV1,
     keyboard: ZwpVirtualKeyboardV1,
     text_keyboards: Vec<ZwpVirtualKeyboardV1>,
     text_codes: HashMap<char, (usize, u16)>,
@@ -510,6 +535,9 @@ impl WaylandKeyboard {
 
         Ok(Self {
             connection,
+            queue_handle: qh,
+            seat: seat.clone(),
+            manager: manager.clone(),
             keyboard,
             text_keyboards,
             text_codes,
@@ -548,11 +576,11 @@ impl KeyboardTransport for WaylandKeyboard {
     }
 
     fn send_text(&mut self, text: &str, delay_ms: u64) -> Result<()> {
-        for ch in text.chars() {
-            let (keyboard_index, code) =
-                self.text_codes.get(&ch).copied().with_context(|| {
-                    format!("character {ch:?} was not in the startup text keymap")
-                })?;
+        // Resolve the complete string before emitting anything. If one
+        // character is unavailable, the caller can safely fall back without
+        // duplicating the already emitted prefix.
+        let sequence = resolve_text_codes(&self.text_codes, text)?;
+        for (keyboard_index, code) in sequence {
             let elapsed = self.started.elapsed().as_millis() as u32;
             self.text_keyboards[keyboard_index].key(
                 elapsed,
@@ -580,6 +608,50 @@ impl KeyboardTransport for WaylandKeyboard {
             .context("wait for Wayland key dispatch")?;
         Ok(())
     }
+
+    fn refresh_text_keymap(&mut self, characters: &str) -> Result<()> {
+        let mut keyboards = Vec::new();
+        let mut codes = HashMap::new();
+        for (keyboard_index, (text_keymap, text_codes)) in
+            build_text_keymaps(characters).into_iter().enumerate()
+        {
+            let keyboard = self
+                .manager
+                .create_virtual_keyboard(&self.seat, &self.queue_handle, ());
+            upload_keymap(&keyboard, &text_keymap)?;
+            keyboards.push(keyboard);
+            codes.extend(
+                text_codes
+                    .into_iter()
+                    .map(|(character, code)| (character, (keyboard_index, code))),
+            );
+        }
+        self.connection
+            .roundtrip()
+            .context("activate refreshed Wayland text keymaps")?;
+        for keyboard in self.text_keyboards.drain(..) {
+            keyboard.destroy();
+        }
+        self.text_keyboards = keyboards;
+        self.text_codes = codes;
+        self.connection
+            .flush()
+            .context("retire previous Wayland text keymaps")
+    }
+}
+
+fn resolve_text_codes(
+    text_codes: &HashMap<char, (usize, u16)>,
+    text: &str,
+) -> Result<Vec<(usize, u16)>> {
+    text.chars()
+        .map(|character| {
+            text_codes
+                .get(&character)
+                .copied()
+                .with_context(|| format!("character {character:?} is not in the text keymap"))
+        })
+        .collect()
 }
 
 fn upload_keymap(keyboard: &ZwpVirtualKeyboardV1, keymap: &str) -> Result<()> {
@@ -746,6 +818,12 @@ fn injection_thread(
             InjectionCmd::Text { text, done } => {
                 let result = keyboard
                     .send_text(&text, delay_ms.load(Ordering::Relaxed))
+                    .map_err(|error| error.to_string());
+                let _ = done.send(result);
+            }
+            InjectionCmd::RefreshTextKeymap { characters, done } => {
+                let result = keyboard
+                    .refresh_text_keymap(&characters)
                     .map_err(|error| error.to_string());
                 let _ = done.send(result);
             }
@@ -950,5 +1028,15 @@ mod tests {
         let fd: OwnedFd = file.into();
 
         assert_eq!(read_wayland_keymap(fd, size).unwrap(), "test keymap");
+    }
+
+    #[test]
+    fn wayland_text_is_fully_resolved_before_injection() {
+        let codes = HashMap::from([('a', (0, 30)), ('b', (0, 48))]);
+        assert_eq!(
+            resolve_text_codes(&codes, "ab").unwrap(),
+            [(0, 30), (0, 48)]
+        );
+        assert!(resolve_text_codes(&codes, "ab🦀").is_err());
     }
 }
