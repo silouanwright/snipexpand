@@ -15,12 +15,6 @@ Fast, config-based text expansion for Linux and Wayland. **First-class support f
 Define a trigger such as `;mail`, then use it across applications. SnipExpand
 types the replacement directly, without the clipboard or editor plugins.
 
-## Why SnipExpand?
-
-Text expansion on Omarchy and Hyprland is still unreliable or awkward.
-SnipExpand was built specifically to work well there. [Compare it with the
-alternatives](#alternatives).
-
 ## Features
 
 - Immediate or terminator-based expansion
@@ -36,6 +30,12 @@ alternatives](#alternatives).
 
 SnipExpand does not run scripts, display forms, insert rich content, or provide
 a package registry. See the [compatibility matrix](docs/compatibility.md).
+
+## Why SnipExpand?
+
+Text expansion on Omarchy and Hyprland is still unreliable or awkward.
+SnipExpand was built specifically to work well there. [Compare it with the
+alternatives](#alternatives).
 
 ## Alternatives
 
