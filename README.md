@@ -74,12 +74,11 @@ Prebuilt x86_64 and aarch64 binaries are available from
 
 ```bash
 snipexpand install
-snipexpand doctor
 ```
 
-First use creates any missing starter files without overwriting your config.
-`install` starts the service and enables it for future sessions. If `doctor`
-reports missing input access, follow its instructions once.
+This creates any missing starter files without overwriting your config, then
+starts the service and enables it for future sessions. Run `snipexpand doctor`
+if setup or expansion does not work.
 
 ## Configure
 
