@@ -77,7 +77,13 @@ work but are not yet part of the supported test matrix.
 
 ## Install
 
-Download the latest x86_64 release:
+Install from crates.io:
+
+```bash
+cargo install snipexpand
+```
+
+Without a Rust toolchain, download the latest prebuilt x86_64 binary:
 
 ```bash
 mkdir -p ~/.local/bin
@@ -88,12 +94,6 @@ chmod +x ~/.local/bin/snipexpand
 
 Each [GitHub Release](https://github.com/silouanwright/snipexpand/releases)
 also includes an aarch64 binary and SHA-256 checksums.
-
-You can also install with Cargo:
-
-```bash
-cargo install snipexpand
-```
 
 Building from source requires `libxkbcommon-dev` and `libwayland-dev` on
 Debian or Ubuntu, or `libxkbcommon` and `wayland` on Arch Linux.
