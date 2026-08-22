@@ -151,6 +151,11 @@ pub async fn run(config: Config) -> Result<()> {
                                     complete_undo(&injector, &mut expander, previous);
                                 }
                             }
+                            _ if ev.value == 2 && ev.code == KEY_BACKSPACE => {
+                                // A held Backspace means continuous deletion, not expansion undo.
+                                input.pending_undo = None;
+                                expander.reset();
+                            }
                             _ if ev.value == 0 => {
                                 complete_pending_expansion(&injector, &config, &mut input, ev.code);
                             }
