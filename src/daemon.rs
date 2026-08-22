@@ -33,12 +33,19 @@ struct Undo {
     original: String,
 }
 
+struct PendingExpansion {
+    release_code: u16,
+    key_released: bool,
+    expansion: crate::expander::Expansion,
+}
+
 #[derive(Default)]
 struct InputState {
     shift_held: bool,
     altgr_held: bool,
     undo: Option<Undo>,
     pending_undo: Option<Undo>,
+    pending_expansion: Option<PendingExpansion>,
 }
 
 pub async fn run(config: Config) -> Result<()> {
@@ -127,16 +134,29 @@ pub async fn run(config: Config) -> Result<()> {
                     Some(ev) => {
                         // Update modifier state on both press and release.
                         match ev.code {
-                            42 | 54 => { input.shift_held = ev.value == 1; }   // L/R Shift
-                            100 => { input.altgr_held = ev.value == 1; } // Right Alt / AltGr
+                            42 | 54 => {
+                                input.shift_held = ev.value == 1;
+                                if ev.value == 0 {
+                                    complete_pending_expansion(&injector, &config, &mut input, ev.code);
+                                }
+                            }   // L/R Shift
+                            100 => {
+                                input.altgr_held = ev.value == 1;
+                                if ev.value == 0 {
+                                    complete_pending_expansion(&injector, &config, &mut input, ev.code);
+                                }
+                            } // Right Alt / AltGr
                             _ if ev.value == 0 && ev.code == KEY_BACKSPACE => {
                                 if let Some(previous) = input.pending_undo.take() {
                                     complete_undo(&injector, &mut expander, previous);
                                 }
                             }
+                            _ if ev.value == 0 => {
+                                complete_pending_expansion(&injector, &config, &mut input, ev.code);
+                            }
                             _ if ev.value == 1 => {
                                 // Key press only. Repeat events flood the buffer.
-                                handle_key_event(&ev, &mut expander, &injector, &config, &mut input);
+                                handle_key_event(&ev, &mut expander, &injector, &mut input);
                             }
                             _ => {}
                         }
@@ -207,12 +227,12 @@ fn handle_key_event(
     ev: &crate::keyboard::KeyEvent,
     expander: &mut Expander,
     injector: &Injector,
-    config: &Arc<Mutex<Config>>,
     input: &mut InputState,
 ) {
     if RESET_KEYS.contains(&ev.code) {
         input.undo = None;
         input.pending_undo = None;
+        input.pending_expansion = None;
         expander.reset();
         return;
     }
@@ -231,7 +251,7 @@ fn handle_key_event(
         input.pending_undo = None;
         let character = if ev.code == KEY_ENTER { '\n' } else { '\t' };
         if let Some(expansion) = expander.push_char(character) {
-            input.undo = inject_expansion(injector, config, expansion);
+            queue_expansion(input, ev.code, expansion);
         }
         return;
     }
@@ -252,13 +272,51 @@ fn handle_key_event(
         );
         if let Some(expansion) = expander.push_char(ch) {
             tracing::info!(
-                "Trigger matched; expanding ({} backspaces + {} chars)",
+                "Trigger matched; waiting for key release ({} backspaces + {} chars)",
                 expansion.delete_count,
                 expansion.text.len()
             );
-            input.undo = inject_expansion(injector, config, expansion);
+            queue_expansion(input, ev.code, expansion);
         }
     }
+}
+
+fn queue_expansion(
+    input: &mut InputState,
+    release_code: u16,
+    expansion: crate::expander::Expansion,
+) {
+    input.pending_expansion = Some(PendingExpansion {
+        release_code,
+        key_released: false,
+        expansion,
+    });
+}
+
+fn complete_pending_expansion(
+    injector: &Injector,
+    config: &Arc<Mutex<Config>>,
+    input: &mut InputState,
+    released_code: u16,
+) {
+    let Some(pending) = input.pending_expansion.as_mut() else {
+        return;
+    };
+    if released_code == pending.release_code {
+        pending.key_released = true;
+    }
+    if !pending.key_released || input.shift_held || input.altgr_held {
+        return;
+    }
+    let Some(pending) = input.pending_expansion.take() else {
+        return;
+    };
+    tracing::info!(
+        "Trigger key released; expanding ({} backspaces + {} chars)",
+        pending.expansion.delete_count,
+        pending.expansion.text.len()
+    );
+    input.undo = inject_expansion(injector, config, pending.expansion);
 }
 
 fn complete_undo(injector: &Injector, expander: &mut Expander, previous: Undo) {
