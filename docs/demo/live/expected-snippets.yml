@@ -1,0 +1,4 @@
+# Snippets are just simple YAML
+matches:
+  - trigger: ";list"
+    replace: "ls -la"

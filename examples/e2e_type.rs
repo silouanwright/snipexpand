@@ -11,7 +11,7 @@ fn event_delay() -> Duration {
         let millis = std::env::var("SNIPEXPAND_E2E_EVENT_DELAY_MS")
             .ok()
             .and_then(|value| value.parse().ok())
-            .unwrap_or(30);
+            .unwrap_or(90);
         Duration::from_millis(millis)
     })
 }
@@ -79,9 +79,11 @@ fn keycode(character: char) -> anyhow::Result<(u16, bool)> {
         ':' => (39, true),
         '<' => (51, true),
         '>' => (52, true),
+        '?' => (53, true),
         '^' => (7, true),
         _ => match normalized {
             ';' => (39, false),
+            ',' => (51, false),
             '-' => (12, false),
             '.' => (52, false),
             '/' => (53, false),
@@ -123,6 +125,21 @@ fn emit_character(device: &mut VirtualDevice, character: char) -> anyhow::Result
 
 fn recenter_nvim_insert(device: &mut VirtualDevice) -> anyhow::Result<()> {
     emit_key_with_delay(device, 88, navigation_event_delay()) // F12
+}
+
+fn type_demo_comment(
+    device: &mut VirtualDevice,
+    comment: &str,
+    submit: bool,
+) -> anyhow::Result<()> {
+    for character in format!("# {comment}").chars() {
+        emit_character_with_delay(device, character, label_event_delay())?;
+    }
+    if submit {
+        emit_key_with_delay(device, 28, label_event_delay())?;
+        std::thread::sleep(Duration::from_millis(500));
+    }
+    Ok(())
 }
 
 fn create_device() -> anyhow::Result<VirtualDevice> {
@@ -202,9 +219,67 @@ fn run_batch(
     Ok(())
 }
 
+fn run_live_reload_demo() -> anyhow::Result<()> {
+    let mut device = create_device()?;
+    std::thread::sleep(Duration::from_millis(1500));
+
+    for character in ";list".chars() {
+        emit_character(&mut device, character)?;
+    }
+    std::thread::sleep(Duration::from_millis(1500));
+    emit_key_with_delay(&mut device, 28, label_event_delay())?;
+    std::thread::sleep(Duration::from_millis(500));
+
+    type_demo_comment(&mut device, "How about adding a flag?", true)?;
+    std::thread::sleep(Duration::from_millis(1400));
+    for character in "nvim snippets.yml".chars() {
+        emit_character_with_delay(&mut device, character, label_event_delay())?;
+    }
+    emit_key_with_delay(&mut device, 28, label_event_delay())?;
+    std::thread::sleep(Duration::from_millis(2000));
+
+    emit_character_with_delay(&mut device, 'O', navigation_event_delay())?;
+    for character in "# Snippets are just simple YAML".chars() {
+        emit_character_with_delay(&mut device, character, label_event_delay())?;
+    }
+    std::thread::sleep(Duration::from_millis(750));
+    emit_key_with_delay(&mut device, 1, navigation_event_delay())?; // Escape
+    emit_key_with_delay(&mut device, 87, navigation_event_delay())?; // F11
+    std::thread::sleep(Duration::from_millis(300));
+
+    for character in " -la".chars() {
+        emit_character_with_delay(&mut device, character, event_delay())?;
+    }
+    std::thread::sleep(Duration::from_millis(1000));
+
+    emit_key_with_delay(&mut device, 1, navigation_event_delay())?; // Escape
+    for character in ":wq".chars() {
+        emit_character_with_delay(&mut device, character, navigation_event_delay())?;
+    }
+    emit_key_with_delay(&mut device, 28, navigation_event_delay())?;
+    std::thread::sleep(Duration::from_millis(2000));
+
+    for character in ";list".chars() {
+        emit_character(&mut device, character)?;
+    }
+    std::thread::sleep(Duration::from_millis(1500));
+    emit_key_with_delay(&mut device, 28, label_event_delay())?;
+    std::thread::sleep(Duration::from_millis(750));
+    type_demo_comment(
+        &mut device,
+        "All snippets reload on save; no restart command required!",
+        false,
+    )?;
+    std::thread::sleep(Duration::from_millis(2500));
+    Ok(())
+}
+
 fn main() -> anyhow::Result<()> {
     let mut args = std::env::args().skip(1);
     let trigger = args.next().unwrap_or_else(|| ";snipexpand".to_string());
+    if trigger == "--live-reload-demo" {
+        return run_live_reload_demo();
+    }
     if trigger == "--batch-file" {
         let path = args
             .next()

@@ -1,7 +1,6 @@
 # SnipExpand
 
-SnipExpand is a fast, config-based text expander for Linux and Wayland, with
-first-class support for [Omarchy](https://omarchy.org) and Hyprland.
+Fast, config-based text expansion for Linux and Wayland. **First-class support for [Omarchy](https://omarchy.org) and [Hyprland](https://hypr.land).**
 
 [![CI](https://github.com/silouanwright/snipexpand/actions/workflows/ci.yml/badge.svg)](https://github.com/silouanwright/snipexpand/actions/workflows/ci.yml)
 [![Release](https://github.com/silouanwright/snipexpand/actions/workflows/release.yml/badge.svg)](https://github.com/silouanwright/snipexpand/actions/workflows/release.yml)
@@ -116,6 +115,12 @@ snipexpand doctor
 The service starts immediately and is enabled for future graphical sessions.
 
 ## Configure
+
+<p>
+  <a href="docs/assets/live-reload.mp4">
+    <img src="docs/assets/live-reload.gif" width="640" alt="SnipExpand expanding a command, reloading its YAML configuration on save, and using the updated command immediately">
+  </a>
+</p>
 
 Add a simple expansion from the command line:
 

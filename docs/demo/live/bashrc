@@ -1,0 +1,5 @@
+PS1='demo ❯ '
+
+nvim() {
+  command nvim -n "$@" -c "luafile $SNIPEXPAND_DEMO_ROOT/docs/demo/live/nvim.lua"
+}
