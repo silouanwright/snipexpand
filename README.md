@@ -4,15 +4,19 @@ SnipExpand is a fast, config-based text expander for Linux and Wayland. It was
 built for a reliable, native experience on [Omarchy](https://omarchy.org) and
 Hyprland.
 
-Type a short trigger such as `;mail` and SnipExpand replaces it with the text
-you configured. Expansions work across applications without modifying the
-clipboard or requiring editor-specific plugins.
-
 [![CI](https://github.com/silouanwright/snipexpand/actions/workflows/ci.yml/badge.svg)](https://github.com/silouanwright/snipexpand/actions/workflows/ci.yml)
 [![Release](https://github.com/silouanwright/snipexpand/actions/workflows/release.yml/badge.svg)](https://github.com/silouanwright/snipexpand/actions/workflows/release.yml)
 [![License: GPL v3+](https://img.shields.io/badge/license-GPLv3%2B-blue.svg)](LICENSE)
 
-[![SnipExpand replacing short triggers with an email address, emoji, Unicode text, a multiline signature, and code](docs/assets/hero-demo.gif)](docs/assets/hero-demo.mp4)
+<p align="center">
+  <a href="docs/assets/hero-demo.mp4">
+    <img src="docs/assets/hero-demo.gif" width="760" alt="SnipExpand replacing short triggers with an email address, emoji, Unicode text, a multiline signature, and code">
+  </a>
+</p>
+
+Type a short trigger such as `;mail` and SnipExpand replaces it with the text
+you configured. Expansions work across applications without modifying the
+clipboard or requiring editor-specific plugins.
 
 ## Why SnipExpand?
 
