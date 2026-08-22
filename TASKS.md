@@ -31,7 +31,7 @@ These tasks should come before adding major expansion features.
   - Test common non-US XKB layouts, held modifiers, dead keys, compose keys,
     key repeat, multiple keyboards, sleep and resume, and device hotplugging.
   - Document IME and Fcitx5 behavior rather than guessing at compatibility.
-- [ ] Remove the GitHub Actions Node 20 deprecation warnings.
+- [x] Remove the GitHub Actions Node 20 deprecation warnings.
 
 ## P1: Highest-value user features
 
