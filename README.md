@@ -156,18 +156,20 @@ class, and executable values needed for an exclusion.
 ## Commands
 
 ```text
-snipexpand                       Run the daemon in the foreground
-snipexpand init                  Explicitly create starter configuration
-snipexpand add TRIGGER TEXT      Add or replace a generated expansion
-snipexpand remove TRIGGER        Remove a generated expansion
-snipexpand list                  List triggers and source files
-snipexpand check                 Validate configuration
-snipexpand detect                Inspect the focused application
-snipexpand reload                Reload the running daemon
-snipexpand status                Show daemon and configuration status
-snipexpand status --json         Emit status as JSON
-snipexpand doctor                Diagnose setup and runtime requirements
-snipexpand install               Install and start the user service
+snipexpand [COMMAND]
+sxp [COMMAND]                    Short form
+
+(no command)                     Run the daemon in the foreground
+init                             Explicitly create starter configuration
+add TRIGGER TEXT                 Add or replace a generated expansion
+remove TRIGGER                   Remove a generated expansion
+list                             List triggers and source files
+check                            Validate configuration
+detect                           Inspect the focused application
+reload                           Reload the running daemon
+status [--json]                  Show daemon and configuration status
+doctor                           Diagnose setup and runtime requirements
+install                          Install and start the user service
 ```
 
 ## Undo
@@ -181,8 +183,9 @@ SnipExpand reads global keyboard events through Linux input devices, including
 sensitive input. Install only binaries you trust.
 
 Application exclusions prevent expansion in matching applications, but they do
-not stop the daemon from receiving keyboard events. SnipExpand cannot determine
-whether a browser currently has a password field focused.
+not stop the daemon from receiving keyboard events. Wayland does not expose a
+browser's focused field type, so system-wide expanders cannot identify password
+fields inside an otherwise allowed browser.
 
 SnipExpand does not execute snippets, access the clipboard, or contact online
 services.
@@ -202,13 +205,13 @@ cargo test
 
 ## License
 
+[GNU General Public License v3.0 or later](LICENSE).
+
 Other platforms offer polished text expansion built in or through expensive
 software. Linux users should not have to settle for less or pay a costly
 subscription for basic infrastructure. SnipExpand is free and open source so
 anyone can use it, study it, improve it, and share it.
 
-SnipExpand is licensed under the [GNU General Public License v3.0 or
-later](LICENSE). Anyone who distributes a modified version must make its source
-available under compatible terms. The project cannot be repackaged and
-distributed as closed-source software. Private use and private modifications
-remain private.
+Anyone who distributes a modified version must make its source available under
+compatible terms. The project cannot be repackaged and distributed as
+closed-source software. Private use and private modifications remain private.
