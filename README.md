@@ -201,4 +201,13 @@ cargo test
 
 ## License
 
-[GNU General Public License v3.0 or later](LICENSE).
+Other platforms offer polished text expansion built in or through expensive
+software. Linux users should not have to settle for less or pay a costly
+subscription for basic infrastructure. SnipExpand is free and open source so
+anyone can use it, study it, improve it, and share it.
+
+SnipExpand is licensed under the [GNU General Public License v3.0 or
+later](LICENSE). Anyone who distributes a modified version must make its source
+available under compatible terms. The project cannot be repackaged and
+distributed as closed-source software. Private use and private modifications
+remain private.
