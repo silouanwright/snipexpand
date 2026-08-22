@@ -11,7 +11,7 @@
 - `src/keyboard.rs`: physical keyboard discovery and evdev event ingestion
 - `src/injector.rs`: XKB keymaps, persistent Wayland injection, and uinput fallback
 - `src/expander.rs`: rolling buffer and trigger matching
-- `src/config.rs`: strict YAML loading, legacy TOML compatibility, and validation
+- `src/config.rs`: strict YAML loading and validation
 - `src/ipc.rs`: UNIX socket IPC used by `reload` and `status`
 - `target/`: generated build artifacts, never edit manually
 
