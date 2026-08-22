@@ -95,7 +95,9 @@ snipexpand add ';mail' 'user@example.com'
 ## Match files
 
 For more control, create or edit a YAML file below
-`~/.config/snipexpand/match/`:
+`~/.config/snipexpand/match/`. SnipExpand offers
+[best-effort compatibility](docs/compatibility.md) with Espanso's YAML match
+format:
 
 ```yaml
 # Match files reload when saved.
