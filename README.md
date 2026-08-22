@@ -12,9 +12,8 @@ Fast, config-based text expansion for Linux and Wayland. **First-class support f
   </a>
 </p>
 
-Type a short trigger such as `;mail` and SnipExpand replaces it with the text
-you configured. Expansions work across applications without modifying the
-clipboard or requiring editor-specific plugins.
+Define a trigger such as `;mail`, then use it across applications. SnipExpand
+types the replacement directly, without the clipboard or editor plugins.
 
 ## Why SnipExpand?
 
@@ -35,28 +34,26 @@ alternatives](#alternatives).
 - Persistent Wayland injection with a `uinput` fallback
 - Strict validation and diagnostics
 
-SnipExpand focuses on dependable text expansion. It does not currently run
-scripts, display forms, insert rich content, or provide a package registry.
-See the [compatibility matrix](docs/compatibility.md) for exact details.
+SnipExpand does not run scripts, display forms, insert rich content, or provide
+a package registry. See the [compatibility matrix](docs/compatibility.md).
 
 ## Alternatives
 
 | Project | Strengths | Why choose SnipExpand instead |
 | --- | --- | --- |
-| [Espanso](https://espanso.org) | Mature, cross-platform automation with forms, scripts, and packages | First-class Omarchy and Hyprland support, built and tested around reliable Wayland input and injection where Espanso can be unreliable |
-| [Taurine](https://github.com/ereinaimer/taurine) | Broad cross-platform Rust automation with a TUI, regex, scripts, conversions, and optional AI | GPL-licensed open source, Git-friendly YAML, persistent clipboard-free Wayland injection, and a smaller local-only security surface |
-| [FlitKey](https://github.com/swarajnandedkar/FlitKey) | A Python and PyQt graphical expander with hotkeys, a picker, imports, and expansion packs | Actual typed expansion on Wayland instead of a copy-and-paste picker, plus automatic YAML reload and no Python GUI runtime |
-| [AutoKey for Wayland](https://github.com/dlk3/autokey-wayland) | Mature GUI automation and Python scripting | Hyprland support, a native Rust daemon, and no Python or desktop-extension runtime; AutoKey's Wayland fork currently supports GNOME only |
-| [Texpand](https://github.com/andresousadotpt/texpand) | Lightweight Go-based Wayland expansion with YAML configuration and cursor placement | A native Rust implementation, persistent Wayland injection, strict validation, application exclusions, diagnostics, and service management |
-| [text-expander-wayland](https://github.com/quantavil/text-expander-wayland) | A small Rust expander with Espanso-style YAML, dynamic variables, and optional AI | A persistent injector instead of per-operation `wtype` or `ydotool`, automatic reload, layout-aware input, an unprivileged user service, and stricter diagnostics |
-| [SRKT](https://github.com/aaaorg/srkt) | A small Rust foundation for Wayland text expansion | Espanso-style YAML, multiline matches, cursor placement, automatic reload, application exclusions, validation, and broader runtime tooling |
+| [Espanso](https://espanso.org) | Cross-platform automation, forms, scripts, and packages | A reliable native Wayland path built for Omarchy and Hyprland |
+| [Taurine](https://github.com/ereinaimer/taurine) | Cross-platform Rust automation with scripts, conversions, and optional AI | A local-only core, YAML configuration, persistent Wayland injection, and GPL licensing |
+| [FlitKey](https://github.com/swarajnandedkar/FlitKey) | A graphical picker with hotkeys, imports, and expansion packs | Typed Wayland expansion instead of copy and paste, with no Python GUI runtime |
+| [AutoKey for Wayland](https://github.com/dlk3/autokey-wayland) | GUI automation and Python scripting | Hyprland support and a native Rust daemon; AutoKey's Wayland fork targets GNOME |
+| [Texpand](https://github.com/andresousadotpt/texpand) | Lightweight Go, YAML, and cursor placement | Rust, persistent Wayland injection, validation, exclusions, and diagnostics |
+| [text-expander-wayland](https://github.com/quantavil/text-expander-wayland) | Rust, Espanso-style YAML, variables, and optional AI | Persistent injection instead of launching `wtype` or `ydotool` for each expansion |
+| [SRKT](https://github.com/aaaorg/srkt) | A small Rust foundation for Wayland expansion | YAML, multiline matches, cursor placement, reloads, exclusions, and runtime tooling |
 
 ## Requirements
 
 - Linux with a Wayland session
-- Read access to `/dev/input/event*`
 - `libxkbcommon` and Wayland client libraries
-- Membership in the system `input` group, or equivalent permissions
+- Read access to `/dev/input/event*`, usually through the system `input` group
 - `wtype` for the Unicode fallback path
 
 Hyprland is the supported and tested compositor. Other Wayland compositors may
@@ -92,10 +89,9 @@ snipexpand install
 snipexpand doctor
 ```
 
-SnipExpand creates missing starter configuration on first use without
-overwriting existing files. The install command starts the service and enables
-it for future graphical sessions. If `doctor` reports missing input-device
-access, follow the permission command it provides and log out and back in once.
+First use creates any missing starter files without overwriting your config.
+`install` starts the service and enables it for future sessions. If `doctor`
+reports missing input access, follow its instructions once.
 
 ## Hot reloading
 
@@ -143,8 +139,7 @@ matches:
     replace: "{{today}}"
 ```
 
-The first `$|$` marker is removed and the cursor is placed at that position.
-Match files reload automatically when saved.
+`$|$` marks the cursor position. Match files reload when saved.
 
 Settings live in `~/.config/snipexpand/config.yml`:
 
@@ -162,9 +157,8 @@ app_exclusions:
   - class: "^org\\.keepassxc\\.KeePassXC$"
 ```
 
-`trigger_mode` can be `immediate` or `space`. Space mode waits for a
-configured Space, Enter, or Tab terminator. Immediate mode expands as soon as
-the trigger is complete.
+`trigger_mode` can be `immediate` or `space`. Immediate mode expands a complete
+trigger. Space mode waits for a configured Space, Enter, or Tab terminator.
 
 `injection_backend: auto` prefers persistent Wayland injection and uses
 `uinput` when the compositor does not expose the required protocol. Adjust
@@ -200,21 +194,19 @@ journalctl --user -u snipexpand -f
 ## Undo
 
 Press Backspace immediately after a plain, single-line expansion to restore its
-trigger. Multiline and cursor-positioned expansions do not arm undo because the
-cursor state is ambiguous.
+trigger. Undo is unavailable for multiline and cursor-positioned expansions.
 
 ## Security
 
-SnipExpand reads physical keyboard events through Linux input devices. A
-process with this access can observe keyboard input across applications,
-including sensitive text. Install only binaries you trust.
+SnipExpand reads global keyboard events through Linux input devices, including
+sensitive input. Install only binaries you trust.
 
 Application exclusions prevent expansion in matching applications, but they do
 not stop the daemon from receiving keyboard events. SnipExpand cannot determine
 whether a browser currently has a password field focused.
 
-SnipExpand does not execute commands from match files and does not read or
-modify the clipboard.
+SnipExpand does not execute snippets, access the clipboard, or contact online
+services.
 
 ## Documentation
 
@@ -231,6 +223,4 @@ cargo test
 
 ## License
 
-[GNU General Public License v3.0 or later](LICENSE). Distributed modifications
-must remain open source under GPL-compatible terms. Private use and modification
-do not require publishing source code.
+[GNU General Public License v3.0 or later](LICENSE).
