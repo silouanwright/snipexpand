@@ -584,30 +584,39 @@ fn upload_keymap(keyboard: &ZwpVirtualKeyboardV1, keymap: &str) -> Result<()> {
     Ok(())
 }
 
+const SAFE_TEXT_CODES: &[u16] = &[
+    30, 48, 46, 32, 18, 33, 34, 35, 23, 36, 37, 38, 50, 49, 24, 25, 16, 19, 31, 20, 22, 47, 17, 45,
+    21, 44,
+];
+
 fn build_text_keymaps(text: &str) -> Vec<(String, HashMap<char, u16>)> {
     let mut chars = text.chars().collect::<Vec<_>>();
     chars.sort_unstable();
     chars.dedup();
-    chars.chunks(246).map(build_text_keymap).collect()
+    chars
+        .chunks(SAFE_TEXT_CODES.len())
+        .map(|chunk| build_text_keymap(chunk, SAFE_TEXT_CODES))
+        .collect()
 }
 
-fn build_text_keymap(chars: &[char]) -> (String, HashMap<char, u16>) {
+fn build_text_keymap(chars: &[char], safe_codes: &[u16]) -> (String, HashMap<char, u16>) {
     let mut codes = HashMap::new();
     let mut keycodes = String::new();
     let mut symbols = String::new();
     for (index, ch) in chars.iter().copied().enumerate() {
-        let code = index as u16 + 1;
+        let code = safe_codes[index];
+        let name = index + 1;
         codes.insert(ch, code);
-        keycodes.push_str(&format!("<K{code}> = {};\n", code + 8));
+        keycodes.push_str(&format!("<K{name}> = {};\n", code + 8));
         let keysym = match ch {
             '\n' => "Return".to_string(),
             '\t' => "Tab".to_string(),
             '\u{1b}' => "Escape".to_string(),
             _ => xkb::keysym_get_name(xkb::utf32_to_keysym(ch as u32)),
         };
-        symbols.push_str(&format!("key <K{code}> {{[{keysym}]}};\n"));
+        symbols.push_str(&format!("key <K{name}> {{[{keysym}]}};\n"));
     }
-    let maximum = codes.len() + 9;
+    let maximum = safe_codes.iter().max().copied().unwrap_or(1) + 8;
     (
         format!(
             "xkb_keymap {{\n\
@@ -892,6 +901,7 @@ mod tests {
         let lookup = KeymapLookup::build_from_xkb(&parsed);
         for character in ['A', '€', '¯', 'ツ'] {
             assert!(codes.contains_key(&character));
+            assert!(SAFE_TEXT_CODES.contains(&codes[&character]));
             assert_eq!(lookup.lookup(character).unwrap().level, 0);
         }
     }

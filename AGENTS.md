@@ -48,6 +48,9 @@ journalctl --user -u snipexpand -f
   required by a `$|$` cursor marker.
 - Wayland uses the active layout for editing keys and separate modifier-free
   text keyboards for configured replacement characters.
+- Persistent text keyboards must use only ordinary unmodified letter keycodes.
+  Function, navigation, and media ranges can activate compositor bindings even
+  when a custom XKB keymap translates them into text.
 - The uinput device name is intentionally `snipexpand virtual keyboard` so it can be filtered out and not re-read as physical input.
 
 ## Important constraints / pitfalls

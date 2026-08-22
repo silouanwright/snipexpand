@@ -59,9 +59,10 @@ layout or Unicode problems ([#1868](https://github.com/espanso/espanso/issues/18
 different systems and do not imply that Espanso fails for everyone. They do
 show why Linux/Wayland deserves a focused reliability effort of its own.
 
-Omarchy is SnipExpand's first proving ground: an opinionated Arch/Hyprland system
-where the whole path can be tested as one experience. The architecture is not
-tied to Omarchy, and future platform backends remain possible.
+Omarchy and Wayland are SnipExpand's first-class platforms. Omarchy provides an
+opinionated Arch/Hyprland environment where the whole path can be tested as one
+experience. Additional operating systems and desktop backends may follow, but
+they do not replace Omarchy as the reference environment and reliability bar.
 
 ## SnipExpand and Espanso
 
