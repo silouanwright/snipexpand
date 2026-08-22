@@ -26,14 +26,10 @@ Fast, config-based text expansion for Linux and Wayland. **First-class support f
 - Persistent Wayland injection with a `uinput` fallback
 - Strict validation and diagnostics
 
-SnipExpand does not run scripts, display forms, insert rich content, or provide
-a package registry. See the [compatibility matrix](docs/compatibility.md).
-
 ## Why SnipExpand?
 
-Text expansion on Omarchy and Hyprland is still unreliable or awkward.
-SnipExpand was built specifically to work well there. Compare it with the
-alternatives below.
+Text expansion on Omarchy and Hyprland is still unreliable or awkward. Compare
+SnipExpand with the alternatives below.
 
 ## Alternatives
 
@@ -55,9 +51,6 @@ systems, you need:
 - `libxkbcommon` and Wayland client libraries
 - Read access to `/dev/input/event*`, usually through the system `input` group
 - `wtype` for the Unicode fallback path
-
-Hyprland is the supported and tested compositor. Other Wayland compositors may
-work but are not yet part of the supported test matrix.
 
 ## Install
 
@@ -185,10 +178,22 @@ doctor                           Diagnose setup and runtime requirements
 install                          Install and start the user service
 ```
 
-## Undo
+## Limitations
 
-Press Backspace immediately after a plain, single-line expansion to restore its
-trigger. Undo is unavailable for multiline and cursor-positioned expansions.
+- Hyprland is the only supported and tested compositor. Other Wayland
+  compositors may work but are not yet part of the test matrix.
+- Undo works only immediately after a plain, single-line expansion. Multiline
+  and cursor-positioned expansions cannot be undone back to their trigger.
+- SnipExpand does not run scripts or shell commands, display forms, insert rich
+  text or images, or provide a package registry.
+- Matches are literal triggers rather than regular expressions. Variables are
+  currently limited to formatted dates.
+- Application exclusions operate at the application level. Wayland does not
+  expose a browser's focused field type, so SnipExpand cannot automatically
+  identify password fields inside an allowed browser.
+
+See the [compatibility matrix](docs/compatibility.md) for the complete supported
+configuration surface.
 
 ## Security
 
@@ -196,9 +201,7 @@ SnipExpand reads global keyboard events through Linux input devices, including
 sensitive input. Install only binaries you trust.
 
 Application exclusions prevent expansion in matching applications, but they do
-not stop the daemon from receiving keyboard events. Wayland does not expose a
-browser's focused field type, so system-wide expanders cannot identify password
-fields inside an otherwise allowed browser.
+not stop the daemon from receiving keyboard events.
 
 SnipExpand does not execute snippets, access the clipboard, or contact online
 services.
