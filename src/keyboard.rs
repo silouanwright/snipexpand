@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 use std::path::PathBuf;
 
-use evdev::{Device, EventType, Key};
+use evdev::{Device, EventType, KeyCode};
 
 /// A single key event forwarded from the kernel via evdev.
 #[derive(Debug, Clone)]
@@ -81,9 +81,9 @@ fn is_keyboard(device: &Device) -> bool {
         return false;
     };
     device.supported_events().contains(EventType::KEY)
-        && keys.contains(Key::KEY_A)
-        && keys.contains(Key::KEY_Z)
-        && keys.contains(Key::KEY_SPACE)
+        && keys.contains(KeyCode::KEY_A)
+        && keys.contains(KeyCode::KEY_Z)
+        && keys.contains(KeyCode::KEY_SPACE)
 }
 
 /// Returns `true` if the device name contains "virtual" (case-insensitive).

@@ -1,7 +1,4 @@
-use evdev::{
-    uinput::{VirtualDevice, VirtualDeviceBuilder},
-    AttributeSet, EventType, InputEvent, Key,
-};
+use evdev::{uinput::VirtualDevice, AttributeSet, EventType, InputEvent, KeyCode};
 use std::sync::OnceLock;
 use std::time::Duration;
 
@@ -55,13 +52,13 @@ fn emit_key_with_delay(
     delay: Duration,
 ) -> anyhow::Result<()> {
     device.emit(&[
-        InputEvent::new(EventType::KEY, code, 1),
-        InputEvent::new(EventType::SYNCHRONIZATION, 0, 0),
+        InputEvent::new(EventType::KEY.0, code, 1),
+        InputEvent::new(EventType::SYNCHRONIZATION.0, 0, 0),
     ])?;
     std::thread::sleep(delay);
     device.emit(&[
-        InputEvent::new(EventType::KEY, code, 0),
-        InputEvent::new(EventType::SYNCHRONIZATION, 0, 0),
+        InputEvent::new(EventType::KEY.0, code, 0),
+        InputEvent::new(EventType::SYNCHRONIZATION.0, 0, 0),
     ])?;
     std::thread::sleep(delay);
     Ok(())
@@ -77,7 +74,7 @@ fn emit_state_with_delay(
     value: i32,
     delay: Duration,
 ) -> anyhow::Result<()> {
-    device.emit(&[InputEvent::new(EventType::KEY, code, value)])?;
+    device.emit(&[InputEvent::new(EventType::KEY.0, code, value)])?;
     std::thread::sleep(delay);
     Ok(())
 }
@@ -154,11 +151,11 @@ fn type_demo_comment(
 }
 
 fn create_device() -> anyhow::Result<VirtualDevice> {
-    let mut keys = AttributeSet::<Key>::new();
+    let mut keys = AttributeSet::<KeyCode>::new();
     for code in 1u16..=248 {
-        keys.insert(Key::new(code));
+        keys.insert(KeyCode::new(code));
     }
-    Ok(VirtualDeviceBuilder::new()?
+    Ok(VirtualDevice::builder()?
         .name("snipexpand e2e source")
         .with_keys(&keys)?
         .build()?)

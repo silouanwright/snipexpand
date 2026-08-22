@@ -20,7 +20,7 @@ path = "src/bin/sxp.rs"
 
 [dependencies]
 # Input reading
-evdev = { version = "0.12", features = ["tokio"] }
+evdev = { version = "0.13", features = ["tokio"] }
 
 # Async runtime
 tokio = { version = "1", features = ["full"] }
@@ -32,7 +32,7 @@ wayland-client = "0.31"
 wayland-protocols-misc = { version = "0.3", features = ["client"] }
 
 # XKB keyboard layout
-xkbcommon = "0.7"
+xkbcommon = "0.9"
 
 # Config
 serde = { version = "1", features = ["derive"] }
@@ -45,14 +45,14 @@ regex = "1"
 clap = { version = "4", features = ["derive"] }
 
 # File watching
-notify = "6"
+notify = "8"
 
 # Logging
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 # Unix primitives
-nix = { version = "0.29", features = ["signal", "fs"] }
+nix = { version = "0.31", features = ["signal", "fs"] }
 
 # Error handling
 anyhow = "1"

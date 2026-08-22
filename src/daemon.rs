@@ -151,7 +151,17 @@ pub async fn run(config: Config) -> Result<()> {
         use notify::{Config as NConfig, RecommendedWatcher, RecursiveMode, Watcher};
         use std::sync::mpsc;
         let (tx, rx) = mpsc::channel();
-        let mut watcher = match RecommendedWatcher::new(tx, NConfig::default()) {
+        let event_tx = tx.clone();
+        let mut watcher = match RecommendedWatcher::new(
+            move |result: notify::Result<notify::Event>| match result {
+                Ok(event) if is_config_change(&event.kind) => {
+                    let _ = event_tx.send(());
+                }
+                Ok(_) => {}
+                Err(error) => tracing::warn!("Config watcher error: {}", error),
+            },
+            NConfig::default(),
+        ) {
             Ok(w) => w,
             Err(e) => {
                 tracing::error!("Config watcher failed to start: {}", e);
@@ -167,6 +177,12 @@ pub async fn run(config: Config) -> Result<()> {
             return;
         }
         while rx.recv().is_ok() {
+            // Editors often save through several create, rename, and modify
+            // operations. Wait for that burst to settle and reload once.
+            while rx
+                .recv_timeout(std::time::Duration::from_millis(50))
+                .is_ok()
+            {}
             let _ = watch_tx2.send(());
         }
     });
@@ -284,6 +300,10 @@ pub async fn run(config: Config) -> Result<()> {
     drop(kb_stream);
     tracing::info!("SnipExpand daemon stopped");
     Ok(())
+}
+
+fn is_config_change(kind: &notify::EventKind) -> bool {
+    kind.is_create() || kind.is_modify() || kind.is_remove()
 }
 
 fn handle_key_event(
@@ -602,5 +622,24 @@ mod tests {
         assert!(input.undo.is_none());
         assert!(input.pending_undo.is_none());
         assert!(input.pending_expansion.is_none());
+    }
+
+    #[test]
+    fn config_watcher_ignores_reads_but_accepts_writes() {
+        use notify::event::{AccessKind, CreateKind, ModifyKind, RemoveKind};
+
+        assert!(!is_config_change(&notify::EventKind::Access(
+            AccessKind::Any
+        )));
+        assert!(!is_config_change(&notify::EventKind::Other));
+        assert!(is_config_change(&notify::EventKind::Create(
+            CreateKind::Any
+        )));
+        assert!(is_config_change(&notify::EventKind::Modify(
+            ModifyKind::Any
+        )));
+        assert!(is_config_change(&notify::EventKind::Remove(
+            RemoveKind::Any
+        )));
     }
 }

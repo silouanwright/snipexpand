@@ -1,5 +1,5 @@
 use anyhow::{Context, Result};
-use evdev::{uinput::VirtualDeviceBuilder, AttributeSet, EventType, InputEvent, Key};
+use evdev::{uinput::VirtualDevice, AttributeSet, EventType, InputEvent, KeyCode};
 use std::collections::HashMap;
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::os::fd::AsFd;
@@ -424,12 +424,12 @@ struct UinputKeyboard {
 
 impl UinputKeyboard {
     fn new() -> Result<Self> {
-        let mut keys = AttributeSet::<Key>::new();
+        let mut keys = AttributeSet::<KeyCode>::new();
         for code in 1u16..=248 {
-            keys.insert(Key::new(code));
+            keys.insert(KeyCode::new(code));
         }
 
-        let device = VirtualDeviceBuilder::new()
+        let device = VirtualDevice::builder()
             .context("Failed to open /dev/uinput; is the 'input' group set?")?
             .name("snipexpand virtual keyboard")
             .with_keys(&keys)
@@ -443,8 +443,8 @@ impl UinputKeyboard {
 impl KeyboardTransport for UinputKeyboard {
     fn send_key(&mut self, code: u16, value: i32) -> Result<()> {
         let events = [
-            InputEvent::new(EventType::KEY, code, value),
-            InputEvent::new(EventType::SYNCHRONIZATION, 0, 0),
+            InputEvent::new(EventType::KEY.0, code, value),
+            InputEvent::new(EventType::SYNCHRONIZATION.0, 0, 0),
         ];
         self.device.emit(&events).context("uinput emit")
     }
@@ -492,10 +492,8 @@ impl WaylandKeyboard {
         let keyboard = manager.create_virtual_keyboard(seat, &qh, ());
 
         let name = std::ffi::CString::new("snipexpand-keymap")?;
-        let fd = nix::sys::memfd::memfd_create(
-            name.as_c_str(),
-            nix::sys::memfd::MemFdCreateFlag::MFD_CLOEXEC,
-        )?;
+        let fd =
+            nix::sys::memfd::memfd_create(name.as_c_str(), nix::sys::memfd::MFdFlags::MFD_CLOEXEC)?;
         let mut file = std::fs::File::from(fd);
         file.write_all(keymap.as_bytes())?;
         file.write_all(b"\0")?;
@@ -656,10 +654,8 @@ fn resolve_text_codes(
 
 fn upload_keymap(keyboard: &ZwpVirtualKeyboardV1, keymap: &str) -> Result<()> {
     let name = std::ffi::CString::new("snipexpand-text-keymap")?;
-    let fd = nix::sys::memfd::memfd_create(
-        name.as_c_str(),
-        nix::sys::memfd::MemFdCreateFlag::MFD_CLOEXEC,
-    )?;
+    let fd =
+        nix::sys::memfd::memfd_create(name.as_c_str(), nix::sys::memfd::MFdFlags::MFD_CLOEXEC)?;
     let mut file = std::fs::File::from(fd);
     file.write_all(keymap.as_bytes())?;
     file.write_all(b"\0")?;
