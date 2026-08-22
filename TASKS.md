@@ -28,6 +28,8 @@ These tasks should come before adding major expansion features.
     temporarily fall back to `wtype`.
   - Add regression coverage for adding and removing Unicode while running.
 - [ ] Expand keyboard and input testing.
+  - [x] Track modifiers independently across multiple keyboards and clear them
+    when a device disconnects.
   - Test common non-US XKB layouts, held modifiers, dead keys, compose keys,
     key repeat, multiple keyboards, sleep and resume, and device hotplugging.
   - Document IME and Fcitx5 behavior rather than guessing at compatibility.

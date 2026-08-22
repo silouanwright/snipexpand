@@ -6,20 +6,27 @@ use evdev::{Device, EventType, Key};
 /// A single key event forwarded from the kernel via evdev.
 #[derive(Debug, Clone)]
 pub struct KeyEvent {
+    pub device: PathBuf,
     pub code: u16,  // Linux evdev keycode
     pub value: i32, // 0=release, 1=press, 2=repeat
 }
 
+#[derive(Debug, Clone)]
+pub enum KeyboardEvent {
+    Key(KeyEvent),
+    Disconnected(PathBuf),
+}
+
 /// Merges key events from all physical keyboards into a single async stream.
 pub struct KeyboardStream {
-    rx: tokio::sync::mpsc::UnboundedReceiver<KeyEvent>,
+    rx: tokio::sync::mpsc::UnboundedReceiver<KeyboardEvent>,
     actor: tokio::task::JoinHandle<()>,
 }
 
 impl KeyboardStream {
     /// Discover keyboards, start per-device reader tasks, and start the hotplug watcher.
     pub async fn new() -> anyhow::Result<Self> {
-        let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<KeyEvent>();
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<KeyboardEvent>();
         let (done_tx, done_rx) = tokio::sync::mpsc::unbounded_channel::<PathBuf>();
 
         // One actor owns the active-device set and periodically reconciles it.
@@ -30,7 +37,7 @@ impl KeyboardStream {
     }
 
     /// Returns the next key event, or `None` if all senders have been dropped.
-    pub async fn next_event(&mut self) -> Option<KeyEvent> {
+    pub async fn next_event(&mut self) -> Option<KeyboardEvent> {
         self.rx.recv().await
     }
 }
@@ -94,10 +101,10 @@ fn is_virtual(device: &Device) -> bool {
 fn run_device_reader(
     mut device: evdev::Device,
     path: PathBuf,
-    tx: tokio::sync::mpsc::UnboundedSender<KeyEvent>,
+    tx: tokio::sync::mpsc::UnboundedSender<KeyboardEvent>,
     done_tx: tokio::sync::mpsc::UnboundedSender<PathBuf>,
 ) {
-    let result = read_device_loop(&mut device, &tx);
+    let result = read_device_loop(&mut device, &path, &tx);
     if let Err(e) = result {
         if e.downcast_ref::<std::io::Error>()
             .and_then(std::io::Error::raw_os_error)
@@ -108,23 +115,26 @@ fn run_device_reader(
             tracing::warn!("Device reader exited for {:?}: {}", path, e);
         }
     }
-    // Notify hotplug actor that this device is no longer active
+    let _ = tx.send(KeyboardEvent::Disconnected(path.clone()));
+    // Notify hotplug actor that this device is no longer active.
     let _ = done_tx.send(path);
 }
 
 fn read_device_loop(
     device: &mut evdev::Device,
-    tx: &tokio::sync::mpsc::UnboundedSender<KeyEvent>,
+    path: &std::path::Path,
+    tx: &tokio::sync::mpsc::UnboundedSender<KeyboardEvent>,
 ) -> anyhow::Result<()> {
     loop {
         for event in device.fetch_events()? {
             if event.event_type() == evdev::EventType::KEY {
                 tracing::debug!(code = event.code(), value = event.value(), "Keyboard event");
                 if tx
-                    .send(KeyEvent {
+                    .send(KeyboardEvent::Key(KeyEvent {
+                        device: path.to_path_buf(),
                         code: event.code(),
                         value: event.value(),
-                    })
+                    }))
                     .is_err()
                 {
                     return Ok(()); // receiver dropped
@@ -137,7 +147,7 @@ fn read_device_loop(
 /// Reconciles `/dev/input` and spawns readers for new keyboard devices.
 /// Also tracks active devices via `done_rx` so replug works correctly.
 async fn hotplug_actor(
-    tx: tokio::sync::mpsc::UnboundedSender<KeyEvent>,
+    tx: tokio::sync::mpsc::UnboundedSender<KeyboardEvent>,
     mut done_rx: tokio::sync::mpsc::UnboundedReceiver<PathBuf>,
     done_tx: tokio::sync::mpsc::UnboundedSender<PathBuf>,
 ) {
@@ -161,7 +171,7 @@ async fn hotplug_actor(
 
 fn reconcile_keyboards(
     active: &mut HashSet<PathBuf>,
-    tx: &tokio::sync::mpsc::UnboundedSender<KeyEvent>,
+    tx: &tokio::sync::mpsc::UnboundedSender<KeyboardEvent>,
     done_tx: &tokio::sync::mpsc::UnboundedSender<PathBuf>,
 ) {
     let keyboards = match discover_keyboards() {

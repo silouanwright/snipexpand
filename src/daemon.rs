@@ -8,7 +8,7 @@ use crate::config::Config;
 use crate::expander::Expander;
 use crate::injector::Injector;
 use crate::ipc::{IpcCmd, IpcServer};
-use crate::keyboard::KeyboardStream;
+use crate::keyboard::{KeyboardEvent, KeyboardStream};
 
 // evdev KEY codes (Linux input-event-codes.h)
 const KEY_BACKSPACE: u16 = 14;
@@ -59,37 +59,44 @@ struct PendingExpansion {
 
 #[derive(Default)]
 struct InputState {
-    held_modifiers: HashSet<u16>,
+    held_modifiers: HashSet<(std::path::PathBuf, u16)>,
     undo: Option<Undo>,
     pending_undo: Option<Undo>,
     pending_expansion: Option<PendingExpansion>,
 }
 
 impl InputState {
-    fn update_modifier(&mut self, code: u16, value: i32) {
+    fn update_modifier(&mut self, device: &std::path::Path, code: u16, value: i32) {
         match value {
             0 => {
-                self.held_modifiers.remove(&code);
+                self.held_modifiers.remove(&(device.to_path_buf(), code));
             }
             1 => {
-                self.held_modifiers.insert(code);
+                self.held_modifiers.insert((device.to_path_buf(), code));
             }
             _ => {}
         }
     }
 
     fn shift_held(&self) -> bool {
-        self.held_modifiers.contains(&42) || self.held_modifiers.contains(&54)
+        self.held_modifiers
+            .iter()
+            .any(|(_, code)| matches!(code, 42 | 54))
     }
 
     fn altgr_held(&self) -> bool {
-        self.held_modifiers.contains(&100)
+        self.held_modifiers.iter().any(|(_, code)| *code == 100)
     }
 
     fn shortcut_held(&self) -> bool {
         self.held_modifiers
             .iter()
-            .any(|code| SHORTCUT_MODIFIERS.contains(code))
+            .any(|(_, code)| SHORTCUT_MODIFIERS.contains(code))
+    }
+
+    fn disconnect_device(&mut self, device: &std::path::Path) {
+        self.held_modifiers
+            .retain(|(held_device, _)| held_device != device);
     }
 }
 
@@ -181,9 +188,9 @@ pub async fn run(config: Config) -> Result<()> {
         tokio::select! {
             event = kb_stream.next_event() => {
                 match event {
-                    Some(ev) => {
+                    Some(KeyboardEvent::Key(ev)) => {
                         if MODIFIER_KEYS.contains(&ev.code) {
-                            input.update_modifier(ev.code, ev.value);
+                            input.update_modifier(&ev.device, ev.code, ev.value);
                             if SHORTCUT_MODIFIERS.contains(&ev.code) {
                                 cancel_input_context(&mut expander, &mut input);
                             } else if ev.value == 0 {
@@ -211,6 +218,10 @@ pub async fn run(config: Config) -> Result<()> {
                             }
                             _ => {}
                         }
+                    }
+                    Some(KeyboardEvent::Disconnected(device)) => {
+                        input.disconnect_device(&device);
+                        cancel_input_context(&mut expander, &mut input);
                     }
                     None => {
                         tracing::warn!("Keyboard stream ended");
@@ -517,18 +528,32 @@ mod tests {
     #[test]
     fn left_and_right_shift_are_tracked_independently() {
         let mut input = InputState::default();
-        input.update_modifier(42, 1);
-        input.update_modifier(54, 1);
-        input.update_modifier(42, 0);
+        let keyboard = std::path::Path::new("/dev/input/event1");
+        input.update_modifier(keyboard, 42, 1);
+        input.update_modifier(keyboard, 54, 1);
+        input.update_modifier(keyboard, 42, 0);
         assert!(input.shift_held());
-        input.update_modifier(54, 0);
+        input.update_modifier(keyboard, 54, 0);
+        assert!(!input.shift_held());
+    }
+
+    #[test]
+    fn modifiers_are_tracked_per_keyboard_and_cleared_on_disconnect() {
+        let mut input = InputState::default();
+        let first = std::path::Path::new("/dev/input/event1");
+        let second = std::path::Path::new("/dev/input/event2");
+        input.update_modifier(first, 42, 1);
+        input.update_modifier(second, 42, 1);
+        input.update_modifier(first, 42, 0);
+        assert!(input.shift_held());
+        input.disconnect_device(second);
         assert!(!input.shift_held());
     }
 
     #[test]
     fn altgr_is_text_input_not_a_shortcut_modifier() {
         let mut input = InputState::default();
-        input.update_modifier(100, 1);
+        input.update_modifier(std::path::Path::new("/dev/input/event1"), 100, 1);
         assert!(input.altgr_held());
         assert!(!input.shortcut_held());
     }
@@ -539,9 +564,10 @@ mod tests {
         let mut input = InputState::default();
         assert!(expander.push_char('a').is_none());
 
-        input.update_modifier(29, 1);
+        let keyboard = std::path::Path::new("/dev/input/event1");
+        input.update_modifier(keyboard, 29, 1);
         cancel_input_context(&mut expander, &mut input);
-        input.update_modifier(29, 0);
+        input.update_modifier(keyboard, 29, 0);
 
         assert!(expander.push_char('c').is_none());
     }
