@@ -128,12 +128,12 @@ matches:
 Settings live in `~/.config/snipexpand/config.yml`:
 
 ```yaml
-# Wait for Space or Enter. Use "immediate" to expand a complete trigger at once.
-trigger_mode: space
-terminators: [space, enter]
+# Choose when expansion happens.
+trigger_mode: space        # immediate | space
+terminators: [space]       # any of: space, enter, tab
 
 # Prefer native Wayland injection and fall back to uinput.
-injection_backend: auto
+injection_backend: auto    # auto | wayland | uinput
 
 # Tune these only if an application drops or reorders characters.
 injection_delay_ms: 1
@@ -142,9 +142,9 @@ uinput_injection_delay_ms: 1
 injection_settle_ms: 10
 
 # Backspace immediately after a simple expansion to restore its trigger.
-undo_enabled: true
+undo_enabled: true         # true | false
 
-# Disable expansion in matching applications.
+# Optional. Disable expansion in matching applications. Default: []
 app_exclusions:
   - class: "^1Password$"
   - class: "^org\\.keepassxc\\.KeePassXC$"
