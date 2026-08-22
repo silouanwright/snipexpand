@@ -1,0 +1,5 @@
+Email => ;mail
+Emoji => ;party
+Unicode => ;shrug
+Signature => ;sig
+Code => ;fn

@@ -1,0 +1,37 @@
+global_vars:
+  - name: today
+    type: date
+    params:
+      format: "%Y-%m-%d"
+
+matches:
+  - triggers: [";mail", ";email"]
+    replace: "hello@example.com"
+
+  - trigger: ";shrug"
+    replace: "¯\\_(ツ)_/¯"
+
+  - trigger: ";party"
+    replace: "🎉"
+
+  - trigger: ";sig"
+    replace: |-
+      Best regards,
+      Alex Example
+
+  - trigger: ";fn"
+    replace: |-
+      fn greet() {
+          $|$
+      }
+
+  - trigger: ";hello"
+    replace: "good morning"
+    propagate_case: true
+    uppercase_style: capitalize_words
+
+  - trigger: ";today"
+    replace: "{{today}}"
+
+  - trigger: ";ship"
+    replace: "Ready to ship."

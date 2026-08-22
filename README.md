@@ -12,6 +12,8 @@ clipboard or requiring editor-specific plugins.
 [![Release](https://github.com/silouanwright/snipexpand/actions/workflows/release.yml/badge.svg)](https://github.com/silouanwright/snipexpand/actions/workflows/release.yml)
 [![License: GPL v3+](https://img.shields.io/badge/license-GPLv3%2B-blue.svg)](LICENSE)
 
+[![SnipExpand replacing short triggers with an email address, emoji, Unicode text, a multiline signature, and code](docs/assets/hero-demo.gif)](docs/assets/hero-demo.mp4)
+
 ## Why SnipExpand?
 
 SnipExpand is built around one job: dependable text expansion on Omarchy and

@@ -1,0 +1,24 @@
+# SnipExpand
+
+Here's a demo.
+
+## Email
+hello@example.com
+
+## Emoji
+🎉
+
+## Unicode
+¯\_(ツ)_/¯
+
+## Signature
+Best regards,
+Alex Example
+
+## Code
+fn greet() {
+    
+}
+
+## Keep exploring!
+See advanced features below.
