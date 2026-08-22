@@ -79,14 +79,6 @@ First use creates any missing starter files without overwriting your config.
 `install` starts the service and enables it for future sessions. If `doctor`
 reports missing input access, follow its instructions once.
 
-## Hot reloading
-
-<p>
-  <a href="docs/assets/live-reload.mp4">
-    <img src="docs/assets/live-reload.gif" width="640" alt="SnipExpand expanding a command, reloading its YAML configuration on save, and using the updated command immediately">
-  </a>
-</p>
-
 ## Configure
 
 Add a simple expansion from the command line:
