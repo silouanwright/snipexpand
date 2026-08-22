@@ -8,9 +8,9 @@ Hyprland.
 [![Release](https://github.com/silouanwright/snipexpand/actions/workflows/release.yml/badge.svg)](https://github.com/silouanwright/snipexpand/actions/workflows/release.yml)
 [![License: GPL v3+](https://img.shields.io/badge/license-GPLv3%2B-blue.svg)](LICENSE)
 
-<p align="center">
+<p>
   <a href="docs/assets/hero-demo.mp4">
-    <img src="docs/assets/hero-demo.gif" width="760" alt="SnipExpand replacing short triggers with an email address, emoji, Unicode text, a multiline signature, and code">
+    <img src="docs/assets/hero-demo.gif" width="640" alt="SnipExpand replacing short triggers with an email address, emoji, Unicode text, a multiline signature, and code">
   </a>
 </p>
 
