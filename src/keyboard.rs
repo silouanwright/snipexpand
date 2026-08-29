@@ -86,12 +86,13 @@ fn is_keyboard(device: &Device) -> bool {
         && keys.contains(KeyCode::KEY_SPACE)
 }
 
-/// Returns `true` if the device name contains "virtual" (case-insensitive).
+/// Returns `true` for SnipExpand's own uinput keyboard to prevent feedback.
 fn is_virtual(device: &Device) -> bool {
-    device
-        .name()
-        .map(|n| n.to_ascii_lowercase().contains("virtual"))
-        .unwrap_or(false)
+    device.name().is_some_and(is_own_virtual_keyboard)
+}
+
+fn is_own_virtual_keyboard(name: &str) -> bool {
+    name.eq_ignore_ascii_case("snipexpand virtual keyboard")
 }
 
 /// Runs the event loop for a single keyboard device.
@@ -194,5 +195,17 @@ fn reconcile_keyboards(
         let tx = tx.clone();
         let done_tx = done_tx.clone();
         std::thread::spawn(move || run_device_reader(device, path, tx, done_tx));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_own_virtual_keyboard;
+
+    #[test]
+    fn ignores_only_our_virtual_keyboard() {
+        assert!(is_own_virtual_keyboard("snipexpand virtual keyboard"));
+        assert!(is_own_virtual_keyboard("SnipExpand Virtual Keyboard"));
+        assert!(!is_own_virtual_keyboard("keyd virtual keyboard"));
     }
 }
