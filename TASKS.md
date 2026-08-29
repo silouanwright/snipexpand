@@ -89,12 +89,16 @@ future feature releases.
 ## P2: Differentiators and power-user features
 
 - [ ] Build an opt-in snippet opportunity advisor.
-  - Detect text the user repeatedly types even though an equivalent snippet
-    already exists.
+  - Detect only exact manual occurrences of eligible, already-configured
+    replacement text. Do not discover arbitrary phrases.
   - Show the highest-value missed opportunity and estimated daily, weekly,
     monthly, and yearly savings.
-  - Keep captured text local, make retention configurable, and provide a clear
-    way to inspect and delete all collected data.
+  - Never persist typed text, hashes, application identities, or event
+    timestamps. Store only opaque snippet IDs, aggregate counters, and one
+    observation start date.
+  - Default off, disclose that field-level password detection is unavailable,
+    and provide clear inspect, reset, disable, and deletion controls.
+  - Remove decoded-character debug logging before introducing advisor state.
 - [ ] Add safe variable types.
   - Consider UUID, random selection, environment values, and clipboard contents
     individually after nested matches.
