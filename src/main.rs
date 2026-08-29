@@ -20,7 +20,13 @@ enum Cmd {
     /// Create starter configuration without overwriting existing files
     Init,
     /// Add or overwrite an expansion (use \\n for newlines)
-    Add { trigger: String, expansion: String },
+    Add {
+        /// Human-readable name shown by snippet browsers
+        #[arg(long)]
+        label: Option<String>,
+        trigger: String,
+        expansion: String,
+    },
     /// Remove an expansion
     Remove { trigger: String },
     /// List all expansions
@@ -117,9 +123,13 @@ fn handle_cmd(cmd: Cmd) -> anyhow::Result<()> {
             println!("exec: {}", info.exec.as_deref().unwrap_or("<unknown>"));
         }
 
-        Cmd::Add { trigger, expansion } => {
+        Cmd::Add {
+            label,
+            trigger,
+            expansion,
+        } => {
             let expansion = expansion.replace("\\n", "\n");
-            config::Config::add_generated(&trigger, &expansion)?;
+            config::Config::add_generated(&trigger, &expansion, label.as_deref())?;
             config::Config::load_default()?;
             println!("Added: {} => {}", trigger, expansion.replace('\n', "\\n"));
             // Signal daemon to reload if running
@@ -263,6 +273,8 @@ fn write_new(path: &std::path::Path, contents: &str) -> anyhow::Result<()> {
 #[derive(Debug, serde::Serialize)]
 struct ListEntry {
     trigger: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    label: Option<String>,
     replacement: String,
     source: String,
     generated: bool,
@@ -278,6 +290,7 @@ fn list_entries(config: &config::Config) -> Vec<ListEntry> {
             let generated = item.source == generated_path;
             item.triggers.iter().map(move |trigger| ListEntry {
                 trigger: trigger.clone(),
+                label: item.label.clone(),
                 replacement: item.replace.clone(),
                 source: item.source.display().to_string(),
                 generated,
@@ -574,6 +587,7 @@ mod tests {
         let handwritten = generated.parent().unwrap().join("personal.yml");
         let make_match = |trigger: &str, source: std::path::PathBuf| config::Match {
             triggers: vec![trigger.to_string()],
+            label: Some(format!("Label for {trigger}")),
             replace: format!("{trigger} replacement"),
             vars: Vec::new(),
             word: false,
@@ -591,6 +605,7 @@ mod tests {
         let entries = list_entries(&config);
 
         assert_eq!(entries[0].trigger, ";a");
+        assert_eq!(entries[0].label.as_deref(), Some("Label for ;a"));
         assert!(entries[0].editable);
         assert!(!entries[1].editable);
     }

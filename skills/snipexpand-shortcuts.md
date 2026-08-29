@@ -53,7 +53,7 @@ snipexpand list
 Add or replace a generated expansion:
 
 ```bash
-snipexpand add ';mail' 'user@example.com'
+snipexpand add --label 'Email address' ';mail' 'user@example.com'
 ```
 
 Use the literal two-character sequence `\n` for newlines in a CLI argument:
@@ -87,6 +87,7 @@ matches:
     replace: "user@example.com"
 
   - trigger: ";sig"
+    label: "Email signature"
     word: true
     replace: |
       Best regards,

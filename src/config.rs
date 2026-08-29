@@ -160,6 +160,7 @@ fn field_matches(pattern: Option<&str>, value: Option<&str>) -> bool {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Match {
     pub triggers: Vec<String>,
+    pub label: Option<String>,
     pub replace: String,
     pub vars: Vec<Variable>,
     pub word: bool,
@@ -235,6 +236,8 @@ struct MatchDefinition {
     trigger: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     triggers: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    label: Option<String>,
     replace: String,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     vars: Vec<Variable>,
@@ -322,6 +325,7 @@ impl Config {
             let vars = merge_variables(path, &file.global_vars, &definition.vars)?;
             self.matches.push(Match {
                 triggers,
+                label: definition.label,
                 replace: definition.replace,
                 vars,
                 word: definition.word,
@@ -440,7 +444,7 @@ impl Config {
         unreachable
     }
 
-    pub fn add_generated(trigger: &str, expansion: &str) -> Result<()> {
+    pub fn add_generated(trigger: &str, expansion: &str, label: Option<&str>) -> Result<()> {
         if trigger.is_empty() {
             bail!("trigger must not be empty");
         }
@@ -457,11 +461,17 @@ impl Config {
             );
         }
         let mut file = load_generated(&path)?;
+        let previous_label = file
+            .matches
+            .iter()
+            .find(|item| item.all_triggers().contains(&trigger))
+            .and_then(|item| item.label.clone());
         file.matches
             .retain(|item| !item.all_triggers().contains(&trigger));
         file.matches.push(MatchDefinition {
             trigger: Some(trigger.to_string()),
             triggers: Vec::new(),
+            label: updated_label(label, previous_label),
             replace: expansion.to_string(),
             vars: Vec::new(),
             word: false,
@@ -484,6 +494,16 @@ impl Config {
         }
         save_generated(&path, &file)?;
         Ok(true)
+    }
+}
+
+fn updated_label(requested: Option<&str>, previous: Option<String>) -> Option<String> {
+    match requested {
+        Some(value) => {
+            let value = value.trim();
+            (!value.is_empty()).then(|| value.to_string())
+        }
+        None => previous,
     }
 }
 
@@ -613,6 +633,7 @@ global_vars:
       format: "%Y-%m-%d"
 matches:
   - triggers: [";mail", ";email"]
+    label: "Email address"
     replace: "me@example.com"
   - trigger: ";today"
     replace: "{{today}}"
@@ -621,6 +642,7 @@ matches:
         let config = Config::load_dir(dir.path()).unwrap();
         assert_eq!(config.matches.len(), 2);
         assert_eq!(config.matches[0].triggers, [";mail", ";email"]);
+        assert_eq!(config.matches[0].label.as_deref(), Some("Email address"));
         assert_eq!(config.matches[1].vars[0].name, "today");
     }
 
@@ -805,6 +827,7 @@ matches:
             matches: vec![MatchDefinition {
                 trigger: Some(";sig".into()),
                 triggers: Vec::new(),
+                label: Some("Signature".into()),
                 replace: "Best,\nSilouan".into(),
                 vars: Vec::new(),
                 word: false,
@@ -816,6 +839,20 @@ matches:
         };
         save_generated(&path, &file).unwrap();
         let loaded = load_generated(&path).unwrap();
+        assert_eq!(loaded.matches[0].label.as_deref(), Some("Signature"));
         assert_eq!(loaded.matches[0].replace, "Best,\nSilouan");
+    }
+
+    #[test]
+    fn generated_label_updates_preserve_set_and_clear_intentionally() {
+        assert_eq!(
+            updated_label(None, Some("Existing".into())).as_deref(),
+            Some("Existing")
+        );
+        assert_eq!(
+            updated_label(Some(" New label "), Some("Existing".into())).as_deref(),
+            Some("New label")
+        );
+        assert_eq!(updated_label(Some(""), Some("Existing".into())), None);
     }
 }

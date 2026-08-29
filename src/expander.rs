@@ -330,6 +330,7 @@ mod tests {
     fn structured_match(trigger: &str, replace: &str) -> Match {
         Match {
             triggers: vec![trigger.to_string()],
+            label: None,
             replace: replace.to_string(),
             vars: Vec::new(),
             word: false,

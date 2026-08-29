@@ -89,7 +89,7 @@ your entire setup this way without learning the commands below.
 Add an expansion from the command line:
 
 ```bash
-snipexpand add ';mail' 'user@example.com'
+snipexpand add --label 'Email address' ';mail' 'user@example.com'
 ```
 
 ## Match files
@@ -114,6 +114,7 @@ matches:
 
   # Whole-word matching and multiline text
   - trigger: ";sig"
+    label: "Email signature"
     word: true
     replace: |
       Best regards,

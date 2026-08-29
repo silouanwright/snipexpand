@@ -11,6 +11,7 @@ than silently changing their behavior.
 | `trigger` | Full | Static triggers |
 | `triggers` | Full | Multiple triggers share one replacement |
 | `replace` | Full | Persistent Wayland text keymaps support configured Unicode; multiline YAML strings supported |
+| `label` | Full | Human-readable name exposed to snippet browsers such as the Omarchy plugin |
 | `$|$` | Full | First cursor marker controls final cursor position |
 | `word` | Core | Requires both left and right word boundaries |
 | `left_word` | Core | Unicode alphanumerics and `_` count as word characters |
@@ -46,7 +47,7 @@ app_exclusions:         # regex filters; entries are OR, fields are AND
 - Shell, script, clipboard, random, echo, choice, and form variables
 - Forms, images, HTML, and Markdown effects
 - Imports and anchors
-- Search metadata
+- Extra `search_terms` metadata
 - Espanso per-app config overrides (SnipExpand supports global app exclusions)
 - Per-match injection backends
 - Espanso Hub package metadata
