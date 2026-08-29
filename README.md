@@ -232,8 +232,11 @@ by `list --json`.
   and cursor-positioned expansions cannot be undone back to their trigger.
 - SnipExpand does not run scripts or shell commands, display forms, insert rich
   text or images, or provide a package registry.
-- Matches are literal triggers rather than regular expressions. Variables are
-  currently limited to formatted dates.
+- Regex triggers use a bounded rolling buffer and support named captures, but
+  do not implement Espanso's full regex behavior.
+- Variables are limited to formatted dates, regex captures, and safe nested
+  snippet references. Shell, script, and form variables are intentionally
+  unsupported.
 - Application exclusions operate at the application level. Wayland does not
   expose a browser's focused field type, so SnipExpand cannot automatically
   identify password fields inside an allowed browser.

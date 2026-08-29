@@ -54,7 +54,8 @@ These are the strongest candidates for the next feature releases.
   - Allow different match sets, trigger modes, and injection timing by title,
     class, or executable.
   - Preserve the current exclusion syntax as the simple path.
-  - Make `snipexpand detect` generate or suggest the relevant YAML.
+  - Use `snipexpand detect` to expose the title, class, and executable values
+    needed to write profile filters.
 - [ ] Add an Espanso migration command.
   - Import the supported subset without rewriting the original configuration.
   - Report every skipped or incompatible field with its file and match.

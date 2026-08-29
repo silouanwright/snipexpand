@@ -32,18 +32,24 @@ SnipExpand should preserve four small boundaries inside one crate:
 | Runtime diagnostics | Wayland failures otherwise look mysterious | Implemented as `snipexpand doctor`, alongside `snipexpand detect` |
 | Backspace undo | Correcting an accidental expansion should be frictionless | Implemented for the immediately preceding plain, single-line expansion |
 
-## Consider later
+## Implemented after the initial review
 
 | Capability | Decision pressure |
 | --- | --- |
 | Clipboard backend for long text | Faster and more complete Unicode, but clipboard preservation and password-manager behavior need careful design |
-| Regex triggers and capture variables | Implemented with a configurable bounded buffer and named captures |
-| Per-app overrides beyond exclusion | Implemented as first-match profiles for match files and behavioral overrides |
-| Nested safe variables | Implemented with missing-reference, ambiguity, and cycle validation |
+| Regex triggers and capture variables | Configurable bounded buffer and named captures |
+| Per-app overrides beyond exclusion | First-match profiles for match files and behavioral overrides |
+| Nested safe variables | Missing-reference, ambiguity, and cycle validation |
+| Search metadata | Espanso-compatible `search_terms` exposed to the Omarchy search plugin |
+| Pause and resume | IPC, CLI, status JSON, and Omarchy plugin controls |
+| Configurable word separators | Optional boundary override with the Unicode-aware default preserved |
+| Duplicate triggers | Profile disambiguation for automatic matching and source-selectable picker insertion |
+
+## Consider later
+
+| Capability | Decision pressure |
+| --- | --- |
 | Package import/export | Start with ordinary directories or Git before building a registry |
-| Search metadata | Add Espanso-compatible `search_terms` now that labels and the Omarchy search plugin exist |
-| Pause and resume | The existing IPC and plugin make explicit controls inexpensive; defer a global keyboard gesture |
-| Configurable word separators | Small compatibility improvement for punctuation, programming, and non-English text |
 
 ## Defer or reject by default
 
