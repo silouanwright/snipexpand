@@ -1,6 +1,6 @@
 [package]
 name = "snipexpand"
-version = "0.2.5"
+version = "0.3.0"
 edition = "2021"
 description = "Fast, config-based text expansion for Linux and Wayland"
 license = "GPL-3.0-or-later"
