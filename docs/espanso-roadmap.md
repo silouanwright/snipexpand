@@ -1,7 +1,7 @@
 # Espanso-informed roadmap
 
 This roadmap is based on an architectural review of Espanso at commit
-`fb3f825` (2026-08-14). This is a behavioral and architectural study, not a
+`3c4a281` (2026-08-24). This is a behavioral and architectural study, not a
 code-porting plan.
 
 ## What Espanso's architecture gets right
@@ -14,29 +14,23 @@ undo. These boundaries explain much of Espanso's capability, but its
 cross-platform UI and package ecosystem also account for substantial
 complexity that a Wayland-native tool does not need.
 
-SnipExpand should preserve four small boundaries inside one crate:
+SnipExpand preserves four small boundaries inside one crate:
 
 1. Detect keyboard and active-application state.
-2. Match static or future regex triggers without rendering side effects.
+2. Match static and regex triggers without rendering side effects.
 3. Render safe, declared variables.
 4. Dispatch through an explicit injection strategy.
 
-## Adopt next
+## Implemented foundation
 
-| Capability | Why | Intended scope |
-| --- | --- | --- |
-| Active-app detection and exclusions | Prevent expansions in password managers and incompatible apps | Class, title, and executable regexes; diagnostic command |
-| Case propagation | High-frequency convenience with small implementation cost | Espanso-compatible `propagate_case` and casing styles |
-| Arbitrary Unicode injection | Active XKB layouts cannot represent every useful character | Implemented with persistent modifier-free Wayland text keymaps and a `wtype` fallback |
-| Initialization | A good first run should not require reading source docs | Create minimal config and examples without overwriting files |
-| Runtime diagnostics | Wayland failures otherwise look mysterious | Implemented as `snipexpand doctor`, alongside `snipexpand detect` |
-| Backspace undo | Correcting an accidental expansion should be frictionless | Implemented for the immediately preceding plain, single-line expansion |
-
-## Implemented after the initial review
-
-| Capability | Decision pressure |
+| Capability | Scope |
 | --- | --- |
-| Clipboard backend for long text | Faster and more complete Unicode, but clipboard preservation and password-manager behavior need careful design |
+| Active-app detection and exclusions | Title, class, and executable regexes with `snipexpand detect` diagnostics |
+| Case propagation | Espanso-compatible `propagate_case` and casing styles |
+| Arbitrary Unicode injection | Persistent modifier-free Wayland text keymaps with a `wtype` fallback |
+| Initialization | Minimal configuration and examples without overwriting existing files |
+| Runtime diagnostics | `snipexpand doctor`, `detect`, `check`, and `status` |
+| Backspace undo | Immediate restoration of the preceding plain, single-line expansion |
 | Regex triggers and capture variables | Configurable bounded buffer and named captures |
 | Per-app overrides beyond exclusion | First-match profiles for match files and behavioral overrides |
 | Nested safe variables | Missing-reference, ambiguity, and cycle validation |
@@ -45,11 +39,17 @@ SnipExpand should preserve four small boundaries inside one crate:
 | Configurable word separators | Optional boundary override with the Unicode-aware default preserved |
 | Duplicate triggers | Profile disambiguation for automatic matching and source-selectable picker insertion |
 
-## Consider later
+## Consider next
 
 | Capability | Decision pressure |
 | --- | --- |
+| Espanso migration | Easier onboarding, but unsupported fields must be reported without rewriting the source configuration |
+| Named snippet groups | Useful organization and quick control once real configurations become difficult to manage |
+| Clipboard backend for long text | Faster long replacements, but clipboard preservation and password-manager behavior need careful design |
 | Package import/export | Start with ordinary directories or Git before building a registry |
+
+See the [prioritized backlog](../TASKS.md) for the current ordering and detailed
+acceptance criteria.
 
 ## Defer or reject by default
 

@@ -19,8 +19,8 @@ than silently changing their behavior.
 | `right_word` | Core | The typed separator is preserved |
 | `propagate_case` | Full | Case-insensitive trigger with replacement casing |
 | `uppercase_style` | Full | `uppercase`, `capitalize`, or `capitalize_words` |
-| `global_vars` | Date | Applied to every match in the file |
-| match `vars` | Date | Applied after global variables |
+| `global_vars` | Core | Date and nested-match variables applied to every match in the file |
+| match `vars` | Core | Date and nested-match variables applied after global variables |
 | date `format` | Full | Chrono/strftime formatting |
 | date `offset` | Full | Signed offset in seconds |
 | nested `match` variable | Full | References another trigger; missing references and cycles are rejected |
@@ -48,9 +48,19 @@ app_exclusions:         # regex filters; entries are OR, fields are AND
 app_profiles:           # first matching profile wins
   - name: Browser
     filter: { class: "firefox" }
+    enabled: true
     include_match_files: [browser.yml]
+    exclude_match_files: [browser/private.yml]
     trigger_mode: space
+    terminators: [space, enter]
+    word_separators: [" ", ".", ","]
+    injection_delay_ms: 1
+    injection_settle_ms: 10
 ```
+
+Profile filters accept `title`, `class`, and `exec` regular expressions. A
+profile can enable or disable expansion, select match files, and override the
+listed matching and timing settings. The first matching profile wins.
 
 ## Unsupported and rejected
 

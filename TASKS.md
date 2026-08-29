@@ -37,7 +37,8 @@ These tasks should come before adding major expansion features.
 
 ## P1: Highest-value user features
 
-These are the strongest candidates for the next feature releases.
+Completed items document shipped work. Remaining items are candidates for
+future feature releases.
 
 - [x] Round out snippet metadata and composition.
   - Support Espanso-compatible `search_terms` and expose them through
