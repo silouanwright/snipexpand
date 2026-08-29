@@ -20,9 +20,14 @@ Fast, config-based text expansion for Linux and Wayland. **First-class support f
 - Cursor placement with `$|$`
 - Recursive YAML configuration with automatic reload
 - Multiple triggers for one replacement
-- Word boundaries, case propagation, and date variables
+- Regex triggers with named captures
+- Reusable nested snippets and date variables
+- Configurable word boundaries and case propagation
+- Search labels and terms for picker integrations
 - Immediate Backspace undo for simple expansions
-- Application exclusions
+- Application exclusions and per-application profiles
+- Pause and resume controls through the CLI, IPC, and Omarchy plugin
+- Deliberate duplicate-trigger selection by source
 - Persistent Wayland injection with a `uinput` fallback
 - Strict validation and diagnostics
 
@@ -193,7 +198,7 @@ app_profiles:
 ```
 
 Run `snipexpand detect` while an application is focused to find the title,
-class, and executable values needed for an exclusion.
+class, and executable values needed for an exclusion or profile.
 
 ## Commands
 
@@ -212,7 +217,8 @@ reload                           Reload the running daemon
 enable                           Enable automatic expansion
 disable                          Pause automatic expansion
 toggle                           Toggle automatic expansion
-paste [--delay-ms N] TRIGGER    Insert a configured expansion
+paste [--source PATH] [--delay-ms N] TRIGGER
+                                Insert a configured expansion
 status [--json]                  Show daemon and configuration status
 doctor                           Diagnose setup and runtime requirements
 install                          Install and start the user service
