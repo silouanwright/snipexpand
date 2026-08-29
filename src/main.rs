@@ -47,6 +47,13 @@ enum Cmd {
     Detect,
     /// Signal running daemon to reload config
     Reload,
+    /// Insert a configured expansion into the focused application
+    Paste {
+        /// Wait for a launcher or panel to close before inserting
+        #[arg(long, default_value_t = 150)]
+        delay_ms: u64,
+        trigger: String,
+    },
     /// Show daemon status
     Status {
         /// Emit machine-readable JSON
@@ -153,6 +160,19 @@ fn handle_cmd(cmd: Cmd) -> anyhow::Result<()> {
             }
             signal_daemon_reload().map_err(|e| anyhow::anyhow!("Could not reach daemon: {}", e))?;
             println!("Reloaded");
+        }
+
+        Cmd::Paste { delay_ms, trigger } => {
+            if delay_ms > 2000 {
+                anyhow::bail!("delay-ms must be between 0 and 2000");
+            }
+            std::thread::sleep(std::time::Duration::from_millis(delay_ms));
+            let response =
+                send_daemon_command(&format!("paste\t{}", serde_json::to_string(&trigger)?))
+                    .map_err(|error| anyhow::anyhow!("Could not reach daemon: {error}"))?;
+            if response != "ok" {
+                anyhow::bail!("{}", response.strip_prefix("error: ").unwrap_or(&response));
+            }
         }
 
         Cmd::Status { json } => {
@@ -436,6 +456,20 @@ fn signal_daemon_reload() -> anyhow::Result<()> {
     stream.write_all(b"reload\n")?;
     let _ = stream.shutdown(std::net::Shutdown::Write);
     Ok(())
+}
+
+fn send_daemon_command(command: &str) -> anyhow::Result<String> {
+    use std::io::{BufRead, BufReader, Write};
+    use std::time::Duration;
+
+    let mut stream = std::os::unix::net::UnixStream::connect(ipc::socket_path()?)?;
+    stream.set_read_timeout(Some(Duration::from_secs(1)))?;
+    stream.set_write_timeout(Some(Duration::from_secs(1)))?;
+    writeln!(stream, "{command}")?;
+    stream.shutdown(std::net::Shutdown::Write)?;
+    let mut response = String::new();
+    BufReader::new(stream).read_line(&mut response)?;
+    Ok(response.trim_end().to_string())
 }
 
 fn daemon_status() -> anyhow::Result<ipc::DaemonStatus> {

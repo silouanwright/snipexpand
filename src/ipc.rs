@@ -14,6 +14,7 @@ pub fn socket_path() -> anyhow::Result<PathBuf> {
 pub enum IpcCmd {
     Reload,
     Status,
+    Paste(String),
 }
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -49,9 +50,14 @@ impl IpcServer {
             let mut reader = BufReader::new(stream);
             let mut line = String::new();
             reader.read_line(&mut line).await?;
-            match line.trim() {
+            let command = line.trim();
+            match command {
                 "reload" => return Ok((IpcCmd::Reload, reader.into_inner())),
                 "status" => return Ok((IpcCmd::Status, reader.into_inner())),
+                value if value.starts_with("paste\t") => {
+                    let trigger = serde_json::from_str(&value[6..])?;
+                    return Ok((IpcCmd::Paste(trigger), reader.into_inner()));
+                }
                 other => {
                     // Log and discard. Do not let a bad client kill the daemon.
                     tracing::warn!("IPC: ignoring unknown command (len={})", other.len());
@@ -121,6 +127,19 @@ mod tests {
 
         let (cmd, _) = server.accept().await.unwrap();
         assert!(matches!(cmd, IpcCmd::Status));
+    }
+
+    #[tokio::test]
+    async fn test_server_receives_paste_command() {
+        let dir = TempDir::new().unwrap();
+        let path = tmp_sock(&dir);
+        let server = IpcServer::new(&path).await.unwrap();
+        let path_clone = path.clone();
+        tokio::spawn(async move {
+            send_cmd(&path_clone, "paste\t\";mail\"").await.unwrap();
+        });
+        let (cmd, _) = server.accept().await.unwrap();
+        assert!(matches!(cmd, IpcCmd::Paste(trigger) if trigger == ";mail"));
     }
 
     #[tokio::test]

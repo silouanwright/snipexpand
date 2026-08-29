@@ -278,6 +278,15 @@ pub async fn run(config: Config) -> Result<()> {
                             let _ = stream.write_all(&response).await;
                         }
                     }
+                    Ok((IpcCmd::Paste(trigger), mut stream)) => {
+                        cancel_input_context(&mut expander, &mut input);
+                        if let Some(expansion) = expander.expansion_for_trigger(&trigger) {
+                            input.undo = inject_expansion(&injector, &config, expansion);
+                            let _ = stream.write_all(b"ok\n").await;
+                        } else {
+                            let _ = stream.write_all(b"error: trigger not found\n").await;
+                        }
+                    }
                     Err(e) => tracing::warn!("IPC error: {}", e),
                 }
             }

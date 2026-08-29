@@ -176,6 +176,7 @@ list                             List triggers and source files
 check                            Validate configuration
 detect                           Inspect the focused application
 reload                           Reload the running daemon
+paste [--delay-ms N] TRIGGER    Insert a configured expansion
 status [--json]                  Show daemon and configuration status
 doctor                           Diagnose setup and runtime requirements
 install                          Install and start the user service

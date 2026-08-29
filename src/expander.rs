@@ -203,6 +203,17 @@ impl Expander {
     pub fn reset(&mut self) {
         self.buffer.clear();
     }
+
+    pub fn expansion_for_trigger(&self, trigger: &str) -> Option<Expansion> {
+        let item = self.matches.iter().find(|item| item.trigger == trigger)?;
+        let (text, cursor_back) = prepare_replacement(&render(item));
+        Some(Expansion {
+            delete_count: 0,
+            text,
+            cursor_back,
+            undo_text: String::new(),
+        })
+    }
 }
 
 fn compile_matches<T: IntoCompiledMatches>(matches: Vec<T>) -> Vec<CompiledMatch> {
@@ -359,6 +370,23 @@ mod tests {
             let result = e.push_char(c);
             assert_eq!(result, None, "partial trigger should not match");
         }
+    }
+
+    #[test]
+    fn expands_selected_trigger_without_deleting_typed_text() {
+        let e = Expander::new(
+            vec![(";bold".to_string(), "**$|$**".to_string())],
+            TriggerMode::Immediate,
+        );
+        assert_eq!(
+            e.expansion_for_trigger(";bold"),
+            Some(Expansion {
+                delete_count: 0,
+                text: "****".to_string(),
+                cursor_back: 2,
+                undo_text: String::new(),
+            })
+        );
     }
 
     #[test]
