@@ -41,7 +41,9 @@ SnipExpand should preserve four small boundaries inside one crate:
 | Per-app overrides beyond exclusion | Useful for injection timing and match sets after exclusions prove the detector |
 | Nested safe variables | Useful once the rendering boundary is explicit; dependency cycles need validation |
 | Package import/export | Start with ordinary directories or Git before building a registry |
-| Search palette | Valuable for discoverability only after the core CLI and match library grow |
+| Search metadata | Add Espanso-compatible `search_terms` now that labels and the Omarchy search plugin exist |
+| Pause and resume | The existing IPC and plugin make explicit controls inexpensive; defer a global keyboard gesture |
+| Configurable word separators | Small compatibility improvement for punctuation, programming, and non-English text |
 
 ## Defer or reject by default
 
@@ -52,7 +54,7 @@ SnipExpand should preserve four small boundaries inside one crate:
   complexity outside the core text-expansion promise.
 - A hosted package registry: governance and supply-chain burden before local
   packaging has proven insufficient.
-- Tray UI, usage statistics, and cross-platform backends: not part of the
+- Usage statistics and cross-platform backends: not part of the current
   Wayland-native product advantage.
 
 ## Lessons from Espanso implementation

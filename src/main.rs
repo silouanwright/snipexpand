@@ -24,6 +24,9 @@ enum Cmd {
         /// Human-readable name shown by snippet browsers
         #[arg(long)]
         label: Option<String>,
+        /// Additional search term (repeatable)
+        #[arg(long = "search-term")]
+        search_terms: Vec<String>,
         trigger: String,
         expansion: String,
     },
@@ -47,6 +50,12 @@ enum Cmd {
     Detect,
     /// Signal running daemon to reload config
     Reload,
+    /// Enable automatic expansion
+    Enable,
+    /// Pause automatic expansion
+    Disable,
+    /// Toggle automatic expansion
+    Toggle,
     /// Insert a configured expansion into the focused application
     Paste {
         /// Wait for a launcher or panel to close before inserting
@@ -132,11 +141,12 @@ fn handle_cmd(cmd: Cmd) -> anyhow::Result<()> {
 
         Cmd::Add {
             label,
+            search_terms,
             trigger,
             expansion,
         } => {
             let expansion = expansion.replace("\\n", "\n");
-            config::Config::add_generated(&trigger, &expansion, label.as_deref())?;
+            config::Config::add_generated(&trigger, &expansion, label.as_deref(), &search_terms)?;
             config::Config::load_default()?;
             println!("Added: {} => {}", trigger, expansion.replace('\n', "\\n"));
             // Signal daemon to reload if running
@@ -162,6 +172,10 @@ fn handle_cmd(cmd: Cmd) -> anyhow::Result<()> {
             println!("Reloaded");
         }
 
+        Cmd::Enable => set_daemon_enabled("enable")?,
+        Cmd::Disable => set_daemon_enabled("disable")?,
+        Cmd::Toggle => set_daemon_enabled("toggle")?,
+
         Cmd::Paste { delay_ms, trigger } => {
             if delay_ms > 2000 {
                 anyhow::bail!("delay-ms must be between 0 and 2000");
@@ -182,6 +196,10 @@ fn handle_cmd(cmd: Cmd) -> anyhow::Result<()> {
                 println!("{}", serde_json::to_string(&status)?);
             } else {
                 println!("SnipExpand daemon is running");
+                println!(
+                    "expansion: {}",
+                    if status.enabled { "enabled" } else { "paused" }
+                );
                 println!("version: {}", status.version);
                 println!("pid: {}", status.pid);
                 println!("injection backend: {}", status.injection_backend);
@@ -207,6 +225,13 @@ fn handle_cmd(cmd: Cmd) -> anyhow::Result<()> {
             uninstall_service()?;
         }
     }
+    Ok(())
+}
+
+fn set_daemon_enabled(command: &str) -> anyhow::Result<()> {
+    let response = send_daemon_command(command)
+        .map_err(|error| anyhow::anyhow!("Could not reach daemon: {error}"))?;
+    println!("SnipExpand {response}");
     Ok(())
 }
 
@@ -295,6 +320,8 @@ struct ListEntry {
     trigger: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     label: Option<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    search_terms: Vec<String>,
     replacement: String,
     source: String,
     generated: bool,
@@ -311,6 +338,7 @@ fn list_entries(config: &config::Config) -> Vec<ListEntry> {
             item.triggers.iter().map(move |trigger| ListEntry {
                 trigger: trigger.clone(),
                 label: item.label.clone(),
+                search_terms: item.search_terms.clone(),
                 replacement: item.replace.clone(),
                 source: item.source.display().to_string(),
                 generated,
@@ -622,6 +650,7 @@ mod tests {
         let make_match = |trigger: &str, source: std::path::PathBuf| config::Match {
             triggers: vec![trigger.to_string()],
             label: Some(format!("Label for {trigger}")),
+            search_terms: vec!["example".into()],
             replace: format!("{trigger} replacement"),
             vars: Vec::new(),
             word: false,
@@ -640,6 +669,7 @@ mod tests {
 
         assert_eq!(entries[0].trigger, ";a");
         assert_eq!(entries[0].label.as_deref(), Some("Label for ;a"));
+        assert_eq!(entries[0].search_terms, ["example"]);
         assert!(entries[0].editable);
         assert!(!entries[1].editable);
     }

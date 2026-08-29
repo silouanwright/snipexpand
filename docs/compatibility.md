@@ -12,6 +12,7 @@ than silently changing their behavior.
 | `triggers` | Full | Multiple triggers share one replacement |
 | `replace` | Full | Persistent Wayland text keymaps support configured Unicode; multiline YAML strings supported |
 | `label` | Full | Human-readable name exposed to snippet browsers such as the Omarchy plugin |
+| `search_terms` | Full | Additional metadata exposed by `list --json` for snippet search |
 | `$|$` | Full | First cursor marker controls final cursor position |
 | `word` | Core | Requires both left and right word boundaries |
 | `left_word` | Core | Unicode alphanumerics and `_` count as word characters |
@@ -22,6 +23,7 @@ than silently changing their behavior.
 | match `vars` | Date | Applied after global variables |
 | date `format` | Full | Chrono/strftime formatting |
 | date `offset` | Full | Signed offset in seconds |
+| nested `match` variable | Full | References another trigger; missing references and cycles are rejected |
 | Multiple files | Full | Recursive `.yml` and `.yaml` discovery |
 
 ## SnipExpand-specific settings
@@ -31,6 +33,7 @@ than silently changing their behavior.
 ```yaml
 trigger_mode: immediate # or space
 terminators: [space]    # any combination of space, enter, tab
+word_separators: [" ", ".", ","] # optional boundary override
 injection_backend: auto # auto, wayland, or uinput; restart after changing
 injection_delay_ms: 1   # 0 to 50; shared fallback
 wayland_injection_delay_ms: 0 # tested Omarchy/Hyprland default
@@ -47,7 +50,6 @@ app_exclusions:         # regex filters; entries are OR, fields are AND
 - Shell, script, clipboard, random, echo, choice, and form variables
 - Forms, images, HTML, and Markdown effects
 - Imports and anchors
-- Extra `search_terms` metadata
 - Espanso per-app config overrides (SnipExpand supports global app exclusions)
 - Per-match injection backends
 - Espanso Hub package metadata
@@ -60,10 +62,9 @@ behavior and tests. Unknown fields are errors.
 SnipExpand detects physical keyboard input through evdev. `auto` prefers
 Wayland virtual-keyboard injection and falls back to uinput. Configured
 replacement characters are mapped across persistent modifier-free Wayland text
-keyboards at startup. Newly added Unicode characters can temporarily fall back
-to `wtype` until restart. It cannot infer whether a browser currently focuses a
-password field. IME/Fcitx5-transformed text can differ from the raw keys
-observed by SnipExpand.
+keyboards at startup and rebuilt after configuration reloads. It cannot infer
+whether a browser currently focuses a password field. IME/Fcitx5-transformed
+text can differ from the raw keys observed by SnipExpand.
 
 In immediate mode, `snipexpand check` warns when a shorter trigger makes a
 longer trigger unreachable.

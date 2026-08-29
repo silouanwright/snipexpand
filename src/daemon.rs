@@ -138,6 +138,7 @@ pub async fn run(config: Config) -> Result<()> {
             cfg.matches.clone(),
             cfg.settings.trigger_mode,
             cfg.settings.terminator_chars(),
+            cfg.settings.word_separator_chars(),
         )
     };
 
@@ -197,6 +198,7 @@ pub async fn run(config: Config) -> Result<()> {
 
     // Track physical modifier state for XKB-based input character decoding.
     let mut input = InputState::default();
+    let mut enabled = true;
 
     tracing::info!("SnipExpand daemon ready");
 
@@ -212,6 +214,10 @@ pub async fn run(config: Config) -> Result<()> {
                             } else if ev.value == 0 {
                                 complete_pending_expansion(&injector, &config, &mut input, ev.code);
                             }
+                            continue;
+                        }
+                        if !enabled {
+                            cancel_input_context(&mut expander, &mut input);
                             continue;
                         }
                         match ev.code {
@@ -264,6 +270,7 @@ pub async fn run(config: Config) -> Result<()> {
                             let cfg = config.lock().unwrap();
                             crate::ipc::DaemonStatus {
                                 running: true,
+                                enabled,
                                 version: env!("CARGO_PKG_VERSION").to_string(),
                                 pid: std::process::id(),
                                 injection_backend: injector.backend().to_string(),
@@ -278,9 +285,22 @@ pub async fn run(config: Config) -> Result<()> {
                             let _ = stream.write_all(&response).await;
                         }
                     }
+                    Ok((command @ (IpcCmd::Enable | IpcCmd::Disable | IpcCmd::Toggle), mut stream)) => {
+                        enabled = match command {
+                            IpcCmd::Enable => true,
+                            IpcCmd::Disable => false,
+                            IpcCmd::Toggle => !enabled,
+                            _ => unreachable!(),
+                        };
+                        cancel_input_context(&mut expander, &mut input);
+                        let response: &[u8] = if enabled { b"enabled\n" } else { b"disabled\n" };
+                        let _ = stream.write_all(response).await;
+                    }
                     Ok((IpcCmd::Paste(trigger), mut stream)) => {
                         cancel_input_context(&mut expander, &mut input);
-                        if let Some(expansion) = expander.expansion_for_trigger(&trigger) {
+                        if !enabled {
+                            let _ = stream.write_all(b"error: expansion is disabled\n").await;
+                        } else if let Some(expansion) = expander.expansion_for_trigger(&trigger) {
                             input.undo = inject_expansion(&injector, &config, expansion);
                             let _ = stream.write_all(b"ok\n").await;
                         } else {
@@ -512,6 +532,7 @@ fn reload_config(config: &Arc<Mutex<Config>>, expander: &mut Expander, injector:
                 new_cfg.matches.clone(),
                 new_cfg.settings.trigger_mode,
                 new_cfg.settings.terminator_chars(),
+                new_cfg.settings.word_separator_chars(),
             );
             injector.set_delay_ms(new_cfg.settings.injection_delay_for(injector.backend()));
             injector.set_settle_ms(new_cfg.settings.injection_settle_ms);

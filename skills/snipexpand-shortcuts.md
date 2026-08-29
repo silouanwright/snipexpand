@@ -53,7 +53,7 @@ snipexpand list
 Add or replace a generated expansion:
 
 ```bash
-snipexpand add --label 'Email address' ';mail' 'user@example.com'
+snipexpand add --label 'Email address' --search-term contact ';mail' 'user@example.com'
 ```
 
 Use the literal two-character sequence `\n` for newlines in a CLI argument:
@@ -88,6 +88,7 @@ matches:
 
   - trigger: ";sig"
     label: "Email signature"
+    search_terms: [closing, sign-off]
     word: true
     replace: |
       Best regards,
@@ -112,11 +113,13 @@ Supported match fields:
 
 - `trigger` or `triggers`
 - `replace`
+- `label` and `search_terms`
 - `word`, `left_word`, and `right_word`
 - `propagate_case`
 - `uppercase_style`: `uppercase`, `capitalize`, or `capitalize_words`
-- match-local `vars` and file-level `global_vars` of type `date`
+- match-local `vars` and file-level `global_vars` of type `date` or `match`
 - date `params.format` and signed `params.offset` in seconds
+- nested-match `params.trigger`, with cycles rejected during validation
 
 The first `$|$` in a replacement sets the final cursor position.
 

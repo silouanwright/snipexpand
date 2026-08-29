@@ -16,6 +16,7 @@ pub struct Expander {
     matches: Vec<CompiledMatch>,
     trigger_mode: TriggerMode,
     terminators: Vec<char>,
+    word_separators: Option<Vec<char>>,
 }
 
 pub(crate) struct CompiledMatch {
@@ -65,13 +66,14 @@ impl IntoCompiledMatches for (String, String) {
 impl Expander {
     #[cfg(test)]
     pub fn new<T: IntoCompiledMatches>(matches: Vec<T>, trigger_mode: TriggerMode) -> Self {
-        Self::new_configured(matches, trigger_mode, vec![' '])
+        Self::new_configured(matches, trigger_mode, vec![' '], None)
     }
 
     pub fn new_configured<T: IntoCompiledMatches>(
         matches: Vec<T>,
         trigger_mode: TriggerMode,
         terminators: Vec<char>,
+        word_separators: Option<Vec<char>>,
     ) -> Self {
         let matches = compile_matches(matches);
         let max_trigger_len = matches
@@ -85,12 +87,13 @@ impl Expander {
             matches,
             trigger_mode,
             terminators,
+            word_separators,
         }
     }
 
     #[cfg(test)]
     pub fn update<T: IntoCompiledMatches>(&mut self, matches: Vec<T>, trigger_mode: TriggerMode) {
-        self.update_configured(matches, trigger_mode, vec![' ']);
+        self.update_configured(matches, trigger_mode, vec![' '], None);
     }
 
     pub fn update_configured<T: IntoCompiledMatches>(
@@ -98,6 +101,7 @@ impl Expander {
         matches: Vec<T>,
         trigger_mode: TriggerMode,
         terminators: Vec<char>,
+        word_separators: Option<Vec<char>>,
     ) {
         let matches = compile_matches(matches);
         self.max_trigger_len = matches
@@ -108,6 +112,7 @@ impl Expander {
         self.matches = matches;
         self.trigger_mode = trigger_mode;
         self.terminators = terminators;
+        self.word_separators = word_separators;
         self.buffer.clear();
     }
 
@@ -133,13 +138,19 @@ impl Expander {
             return None;
         }
 
-        if !is_word_char(c) {
+        if self.is_word_separator(c) {
             if let Some(expansion) = self.find_right_word_match(c) {
                 return Some(expansion);
             }
         }
 
         self.find_match(None)
+    }
+
+    fn is_word_separator(&self, value: char) -> bool {
+        self.word_separators
+            .as_ref()
+            .map_or_else(|| !is_word_char(value), |values| values.contains(&value))
     }
 
     fn find_match(&mut self, terminator: Option<char>) -> Option<Expansion> {
@@ -151,11 +162,12 @@ impl Expander {
                 continue;
             }
             if let Some(typed_trigger) = matching_suffix(&buf_str, item) {
-                if !left_boundary_matches(&buf_str, item) {
+                if !left_boundary_matches(&buf_str, item, self.word_separators.as_deref()) {
                     continue;
                 }
                 let delete_count = item.trigger.chars().count() + terminator_count;
-                let rendered = apply_propagated_case(render(item), item, &typed_trigger);
+                let rendered =
+                    apply_propagated_case(render(&self.matches, item), item, &typed_trigger);
                 let (text, cursor_back) = prepare_replacement(&rendered);
                 self.buffer.clear();
                 return Some(Expansion {
@@ -176,13 +188,15 @@ impl Expander {
         let mut buf_str: String = self.buffer.iter().collect();
         buf_str.pop();
         for item in &self.matches {
-            if !item.right_word || !left_boundary_matches(&buf_str, item) {
+            if !item.right_word
+                || !left_boundary_matches(&buf_str, item, self.word_separators.as_deref())
+            {
                 continue;
             }
             let Some(typed_trigger) = matching_suffix(&buf_str, item) else {
                 continue;
             };
-            let rendered = apply_propagated_case(render(item), item, &typed_trigger);
+            let rendered = apply_propagated_case(render(&self.matches, item), item, &typed_trigger);
             let replacement = format!("{}{}", rendered, separator);
             let (text, cursor_back) = prepare_replacement(&replacement);
             self.buffer.clear();
@@ -206,7 +220,7 @@ impl Expander {
 
     pub fn expansion_for_trigger(&self, trigger: &str) -> Option<Expansion> {
         let item = self.matches.iter().find(|item| item.trigger == trigger)?;
-        let (text, cursor_back) = prepare_replacement(&render(item));
+        let (text, cursor_back) = prepare_replacement(&render(&self.matches, item));
         Some(Expansion {
             delete_count: 0,
             text,
@@ -225,7 +239,11 @@ fn compile_matches<T: IntoCompiledMatches>(matches: Vec<T>) -> Vec<CompiledMatch
     compiled
 }
 
-fn left_boundary_matches(buffer: &str, item: &CompiledMatch) -> bool {
+fn left_boundary_matches(
+    buffer: &str,
+    item: &CompiledMatch,
+    word_separators: Option<&[char]>,
+) -> bool {
     if !item.left_word {
         return true;
     }
@@ -233,7 +251,9 @@ fn left_boundary_matches(buffer: &str, item: &CompiledMatch) -> bool {
         .chars()
         .rev()
         .nth(item.trigger.chars().count())
-        .is_none_or(|value| !is_word_char(value))
+        .is_none_or(|value| {
+            word_separators.map_or_else(|| !is_word_char(value), |values| values.contains(&value))
+        })
 }
 
 fn matching_suffix(buffer: &str, item: &CompiledMatch) -> Option<String> {
@@ -303,21 +323,26 @@ fn is_word_char(value: char) -> bool {
     value.is_alphanumeric() || value == '_'
 }
 
-fn render(item: &CompiledMatch) -> String {
+fn render(matches: &[CompiledMatch], item: &CompiledMatch) -> String {
     let mut result = item.replace.clone();
     for variable in &item.vars {
-        if variable.kind == VariableKind::Date {
-            let now = chrono::Local::now() + chrono::Duration::seconds(variable.params.offset);
-            let format = if variable.params.format.is_empty() {
-                "%Y-%m-%d"
-            } else {
-                &variable.params.format
-            };
-            result = result.replace(
-                &format!("{{{{{}}}}}", variable.name),
-                &now.format(format).to_string(),
-            );
-        }
+        let value = match variable.kind {
+            VariableKind::Date => {
+                let now = chrono::Local::now() + chrono::Duration::seconds(variable.params.offset);
+                let format = if variable.params.format.is_empty() {
+                    "%Y-%m-%d"
+                } else {
+                    &variable.params.format
+                };
+                now.format(format).to_string()
+            }
+            VariableKind::Match => matches
+                .iter()
+                .find(|candidate| candidate.trigger == variable.params.trigger)
+                .map(|candidate| render(matches, candidate))
+                .expect("nested match references were validated"),
+        };
+        result = result.replace(&format!("{{{{{}}}}}", variable.name), &value);
     }
     result
 }
@@ -342,6 +367,7 @@ mod tests {
         Match {
             triggers: vec![trigger.to_string()],
             label: None,
+            search_terms: Vec::new(),
             replace: replace.to_string(),
             vars: Vec::new(),
             word: false,
@@ -634,6 +660,7 @@ mod tests {
             vec![(";mail".to_string(), "user@example.com".to_string())],
             TriggerMode::Space,
             vec!['\n'],
+            None,
         );
         for c in ";mail".chars() {
             assert!(e.push_char(c).is_none());
@@ -643,6 +670,27 @@ mod tests {
             assert!(e.push_char(c).is_none());
         }
         assert_eq!(e.push_char('\n').unwrap().delete_count, 6);
+    }
+
+    #[test]
+    fn configured_word_separators_control_boundaries() {
+        let mut item = structured_match("cat", "animal");
+        item.left_word = true;
+        let mut expander = Expander::new_configured(
+            vec![item],
+            TriggerMode::Immediate,
+            vec![' '],
+            Some(vec!['.']),
+        );
+        for character in "-cat".chars() {
+            assert!(expander.push_char(character).is_none());
+        }
+        expander.reset();
+        let mut expansion = None;
+        for character in ".cat".chars() {
+            expansion = expander.push_char(character);
+        }
+        assert_eq!(expansion.unwrap().text, "animal");
     }
 
     #[test]
@@ -753,6 +801,7 @@ mod tests {
             params: crate::config::VariableParams {
                 format: "%Y".to_string(),
                 offset: 0,
+                trigger: String::new(),
             },
         });
         let mut e = Expander::new(vec![item], TriggerMode::Immediate);
@@ -764,6 +813,26 @@ mod tests {
             expansion.unwrap().text,
             format!("Year: {}", chrono::Local::now().format("%Y"))
         );
+    }
+
+    #[test]
+    fn nested_match_variables_render_referenced_snippets() {
+        let shared = structured_match(";name", "Silouan");
+        let mut greeting = structured_match(";greet", "Hello, {{person}}!");
+        greeting.vars.push(crate::config::Variable {
+            name: "person".into(),
+            kind: VariableKind::Match,
+            params: crate::config::VariableParams {
+                trigger: ";name".into(),
+                ..Default::default()
+            },
+        });
+        let mut expander = Expander::new(vec![shared, greeting], TriggerMode::Immediate);
+        let mut expansion = None;
+        for character in ";greet".chars() {
+            expansion = expander.push_char(character);
+        }
+        assert_eq!(expansion.unwrap().text, "Hello, Silouan!");
     }
 
     #[test]

@@ -14,12 +14,16 @@ pub fn socket_path() -> anyhow::Result<PathBuf> {
 pub enum IpcCmd {
     Reload,
     Status,
+    Enable,
+    Disable,
+    Toggle,
     Paste(String),
 }
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct DaemonStatus {
     pub running: bool,
+    pub enabled: bool,
     pub version: String,
     pub pid: u32,
     pub injection_backend: String,
@@ -54,6 +58,9 @@ impl IpcServer {
             match command {
                 "reload" => return Ok((IpcCmd::Reload, reader.into_inner())),
                 "status" => return Ok((IpcCmd::Status, reader.into_inner())),
+                "enable" => return Ok((IpcCmd::Enable, reader.into_inner())),
+                "disable" => return Ok((IpcCmd::Disable, reader.into_inner())),
+                "toggle" => return Ok((IpcCmd::Toggle, reader.into_inner())),
                 value if value.starts_with("paste\t") => {
                     let trigger = serde_json::from_str(&value[6..])?;
                     return Ok((IpcCmd::Paste(trigger), reader.into_inner()));
@@ -160,6 +167,7 @@ mod tests {
     fn daemon_status_round_trips_as_json() {
         let status = DaemonStatus {
             running: true,
+            enabled: true,
             version: env!("CARGO_PKG_VERSION").to_string(),
             pid: 42,
             injection_backend: "wayland".to_string(),
@@ -171,5 +179,27 @@ mod tests {
         let encoded = serde_json::to_string(&status).unwrap();
         let decoded: DaemonStatus = serde_json::from_str(&encoded).unwrap();
         assert_eq!(decoded, status);
+    }
+
+    #[tokio::test]
+    async fn test_server_receives_state_commands() {
+        for (wire, expected) in [
+            ("enable", IpcCmd::Enable),
+            ("disable", IpcCmd::Disable),
+            ("toggle", IpcCmd::Toggle),
+        ] {
+            let dir = TempDir::new().unwrap();
+            let path = tmp_sock(&dir);
+            let server = IpcServer::new(&path).await.unwrap();
+            let path_clone = path.clone();
+            tokio::spawn(async move {
+                send_cmd(&path_clone, wire).await.unwrap();
+            });
+            let (actual, _) = server.accept().await.unwrap();
+            assert_eq!(
+                std::mem::discriminant(&actual),
+                std::mem::discriminant(&expected)
+            );
+        }
     }
 }

@@ -89,7 +89,7 @@ your entire setup this way without learning the commands below.
 Add an expansion from the command line:
 
 ```bash
-snipexpand add --label 'Email address' ';mail' 'user@example.com'
+snipexpand add --label 'Email address' --search-term contact ';mail' 'user@example.com'
 ```
 
 ## Match files
@@ -110,6 +110,8 @@ global_vars:
 matches:
   # Multiple triggers, one replacement
   - triggers: [";mail", ";email"]
+    label: "Email address"
+    search_terms: [email, contact]
     replace: "user@example.com"
 
   # Whole-word matching and multiline text
@@ -130,6 +132,18 @@ matches:
   # Insert a formatted date
   - trigger: ";today"
     replace: "{{today}}"
+
+  # Reuse another snippet without running commands.
+  - trigger: ";name"
+    replace: "Your Name"
+
+  - trigger: ";greeting"
+    replace: "Hello from {{name}}"
+    vars:
+      - name: name
+        type: match
+        params:
+          trigger: ";name"
 ```
 
 ## Settings
@@ -140,6 +154,9 @@ Edit `~/.config/snipexpand/config.yml`:
 # Choose when expansion happens.
 trigger_mode: space        # immediate | space
 terminators: [space]       # any of: space, enter, tab
+
+# Optional. Override which characters delimit word-boundary matches.
+# word_separators: [" ", ".", ",", "!", "?"]
 
 # Prefer native Wayland injection and fall back to uinput.
 injection_backend: auto    # auto | wayland | uinput
@@ -176,6 +193,9 @@ list                             List triggers and source files
 check                            Validate configuration
 detect                           Inspect the focused application
 reload                           Reload the running daemon
+enable                           Enable automatic expansion
+disable                          Pause automatic expansion
+toggle                           Toggle automatic expansion
 paste [--delay-ms N] TRIGGER    Insert a configured expansion
 status [--json]                  Show daemon and configuration status
 doctor                           Diagnose setup and runtime requirements

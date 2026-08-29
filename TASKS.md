@@ -39,6 +39,17 @@ These tasks should come before adding major expansion features.
 
 These are the strongest candidates for the next feature releases.
 
+- [x] Round out snippet metadata and composition.
+  - Support Espanso-compatible `search_terms` and expose them through
+    `snipexpand list --json` for the Omarchy plugin.
+  - Support safe nested `match` variables so shared text can be reused without
+    shell execution or copy-and-paste duplication.
+  - Reject missing references and dependency cycles during `snipexpand check`.
+- [x] Add pause and resume controls.
+  - Expose `enable`, `disable`, and `toggle` over the existing IPC connection.
+  - Include the enabled state in `status --json` and the Omarchy plugin.
+  - Consider a configurable double-tap modifier only after CLI and plugin
+    controls prove insufficient.
 - [ ] Add per-application profiles.
   - Allow different match sets, trigger modes, and injection timing by title,
     class, or executable.
@@ -52,10 +63,19 @@ These are the strongest candidates for the next feature releases.
   - Bound the input buffer and regex execution so matching stays predictable.
   - Define deletion, boundaries, case propagation, and overlapping matches
     before accepting the syntax.
-- [ ] Add a snippet search palette.
-  - Provide fuzzy search by trigger, replacement preview, and optional label.
-  - Keep the daemon usable without any GUI process.
-  - Avoid stealing focus or breaking insertion into the original application.
+- [x] Add a snippet search palette through the Omarchy plugin.
+  - Search labels, triggers, and replacement previews.
+  - Insert through `snipexpand paste` while keeping the daemon independent of
+    the plugin.
+- [x] Make word-boundary behavior configurable.
+  - Add Espanso-compatible `word_separators` for punctuation, programming, and
+    language-specific workflows.
+  - Preserve the current Unicode-aware default when the setting is absent.
+- [ ] Handle duplicate triggers deliberately.
+  - Keep duplicates as validation errors until typed-trigger disambiguation has
+    a reliable chooser and focus-restoration path.
+  - Let the search palette expose separately labeled snippets without weakening
+    deterministic keyboard expansion.
 - [ ] Add named snippet groups and quick enable or disable controls.
   - Support global and application-scoped groups.
   - Expose group state through the CLI and status JSON.
@@ -75,8 +95,8 @@ These are the strongest candidates for the next feature releases.
   - Keep captured text local, make retention configurable, and provide a clear
     way to inspect and delete all collected data.
 - [ ] Add safe variable types.
-  - Consider UUID, random choice, environment values, and clipboard contents
-    individually.
+  - Consider UUID, random selection, environment values, and clipboard contents
+    individually after nested matches.
   - Require explicit opt-in for sensitive sources such as the clipboard.
   - Continue rejecting arbitrary shell and script execution by default.
 - [ ] Support multiple cursor stops.
@@ -87,9 +107,11 @@ These are the strongest candidates for the next feature releases.
   - Start with import and export of ordinary directories.
   - Pin revisions and validate all imported YAML.
   - Do not build a hosted package registry until this proves insufficient.
-- [ ] Explore a small desktop companion.
-  - Prioritize status, pause, search, editing, diagnostics, and update guidance.
-  - Keep configuration as readable YAML and the daemon independent of the GUI.
+- [x] Ship an Omarchy companion plugin.
+  - Search, insert, add, edit, remove, diagnose, and restart snippets and the
+    service while keeping the daemon independent of the UI.
+- [ ] Explore a cross-platform desktop companion only when another supported
+  platform needs one.
 
 ## P3: Broader platform work
 
@@ -113,10 +135,10 @@ accepted without a new design decision:
 
 ## Prioritization signals
 
-The ordering favors reliability, installation, application-aware behavior,
-migration, regex matching, and discoverability. Those needs recur in mature
-text-expander communities, while SnipExpand's strongest advantage remains a
-small, reliable Wayland-native core.
+The ordering favors reliability and small additions that strengthen ordinary
+text expansion. Espanso's `search_terms`, nested matches, pause controls, and
+configurable word separators fit SnipExpand's existing architecture. Forms,
+rich text, clipboard automation, and arbitrary code execution do not.
 
 Useful upstream signals:
 

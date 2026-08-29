@@ -36,6 +36,9 @@ pub struct Settings {
     pub trigger_mode: TriggerMode,
     #[serde(default = "default_terminators")]
     pub terminators: Vec<Terminator>,
+    /// Optional Espanso-compatible characters that delimit words.
+    #[serde(default)]
+    pub word_separators: Option<Vec<String>>,
     /// Injection transport. Auto prefers Wayland and falls back to uinput.
     #[serde(default)]
     pub injection_backend: InjectionBackend,
@@ -62,6 +65,7 @@ impl Default for Settings {
         Self {
             trigger_mode: TriggerMode::Immediate,
             terminators: default_terminators(),
+            word_separators: None,
             injection_backend: InjectionBackend::Auto,
             injection_delay_ms: default_injection_delay_ms(),
             wayland_injection_delay_ms: None,
@@ -99,6 +103,20 @@ impl Settings {
                 Terminator::Tab => '\t',
             })
             .collect()
+    }
+
+    pub fn word_separator_chars(&self) -> Option<Vec<char>> {
+        self.word_separators.as_ref().map(|values| {
+            values
+                .iter()
+                .map(|value| {
+                    value
+                        .chars()
+                        .next()
+                        .expect("word separators were validated")
+                })
+                .collect()
+        })
     }
 
     pub fn injection_delay_for(&self, backend: &str) -> u64 {
@@ -161,6 +179,7 @@ fn field_matches(pattern: Option<&str>, value: Option<&str>) -> bool {
 pub struct Match {
     pub triggers: Vec<String>,
     pub label: Option<String>,
+    pub search_terms: Vec<String>,
     pub replace: String,
     pub vars: Vec<Variable>,
     pub word: bool,
@@ -194,6 +213,7 @@ pub struct Variable {
 #[serde(rename_all = "lowercase")]
 pub enum VariableKind {
     Date,
+    Match,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -203,6 +223,8 @@ pub struct VariableParams {
     pub format: String,
     #[serde(default)]
     pub offset: i64,
+    #[serde(default)]
+    pub trigger: String,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -238,6 +260,8 @@ struct MatchDefinition {
     triggers: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     label: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    search_terms: Vec<String>,
     replace: String,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     vars: Vec<Variable>,
@@ -326,6 +350,7 @@ impl Config {
             self.matches.push(Match {
                 triggers,
                 label: definition.label,
+                search_terms: definition.search_terms,
                 replace: definition.replace,
                 vars,
                 word: definition.word,
@@ -361,6 +386,13 @@ impl Config {
         if self.settings.injection_settle_ms > 100 {
             bail!("injection_settle_ms must be between 0 and 100");
         }
+        if let Some(separators) = &self.settings.word_separators {
+            for separator in separators {
+                if separator.chars().count() != 1 {
+                    bail!("word_separators entries must contain exactly one character");
+                }
+            }
+        }
         for filter in &self.settings.app_exclusions {
             filter.validate()?;
         }
@@ -393,7 +425,30 @@ impl Config {
                         var.name
                     );
                 }
+                if var.kind == VariableKind::Match && var.params.trigger.is_empty() {
+                    bail!(
+                        "{}: match variable '{}' requires params.trigger",
+                        item.source.display(),
+                        var.name
+                    );
+                }
             }
+        }
+        self.validate_match_references()?;
+        Ok(())
+    }
+
+    fn validate_match_references(&self) -> Result<()> {
+        let by_trigger = self
+            .matches
+            .iter()
+            .enumerate()
+            .flat_map(|(index, item)| item.triggers.iter().map(move |trigger| (trigger, index)))
+            .collect::<HashMap<_, _>>();
+        let mut visiting = HashSet::new();
+        let mut visited = HashSet::new();
+        for index in 0..self.matches.len() {
+            validate_match_reference(index, self, &by_trigger, &mut visiting, &mut visited)?;
         }
         Ok(())
     }
@@ -444,7 +499,12 @@ impl Config {
         unreachable
     }
 
-    pub fn add_generated(trigger: &str, expansion: &str, label: Option<&str>) -> Result<()> {
+    pub fn add_generated(
+        trigger: &str,
+        expansion: &str,
+        label: Option<&str>,
+        search_terms: &[String],
+    ) -> Result<()> {
         if trigger.is_empty() {
             bail!("trigger must not be empty");
         }
@@ -466,12 +526,23 @@ impl Config {
             .iter()
             .find(|item| item.all_triggers().contains(&trigger))
             .and_then(|item| item.label.clone());
+        let previous_search_terms = file
+            .matches
+            .iter()
+            .find(|item| item.all_triggers().contains(&trigger))
+            .map(|item| item.search_terms.clone())
+            .unwrap_or_default();
         file.matches
             .retain(|item| !item.all_triggers().contains(&trigger));
         file.matches.push(MatchDefinition {
             trigger: Some(trigger.to_string()),
             triggers: Vec::new(),
             label: updated_label(label, previous_label),
+            search_terms: if search_terms.is_empty() {
+                previous_search_terms
+            } else {
+                normalized_search_terms(search_terms)
+            },
             replace: expansion.to_string(),
             vars: Vec::new(),
             word: false,
@@ -495,6 +566,53 @@ impl Config {
         save_generated(&path, &file)?;
         Ok(true)
     }
+}
+
+fn validate_match_reference(
+    index: usize,
+    config: &Config,
+    by_trigger: &HashMap<&String, usize>,
+    visiting: &mut HashSet<usize>,
+    visited: &mut HashSet<usize>,
+) -> Result<()> {
+    if visited.contains(&index) {
+        return Ok(());
+    }
+    if !visiting.insert(index) {
+        bail!(
+            "{}: nested match reference cycle",
+            config.matches[index].source.display()
+        );
+    }
+    for variable in &config.matches[index].vars {
+        if variable.kind != VariableKind::Match {
+            continue;
+        }
+        let Some(&target) = by_trigger.get(&variable.params.trigger) else {
+            bail!(
+                "{}: match variable '{}' references unknown trigger '{}'",
+                config.matches[index].source.display(),
+                variable.name,
+                variable.params.trigger
+            );
+        };
+        validate_match_reference(target, config, by_trigger, visiting, visited)?;
+    }
+    visiting.remove(&index);
+    visited.insert(index);
+    Ok(())
+}
+
+fn normalized_search_terms(values: &[String]) -> Vec<String> {
+    let mut values = values
+        .iter()
+        .map(|value| value.trim())
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+        .collect::<Vec<_>>();
+    values.sort();
+    values.dedup();
+    values
 }
 
 fn updated_label(requested: Option<&str>, previous: Option<String>) -> Option<String> {
@@ -634,6 +752,7 @@ global_vars:
 matches:
   - triggers: [";mail", ";email"]
     label: "Email address"
+    search_terms: [email, contact]
     replace: "me@example.com"
   - trigger: ";today"
     replace: "{{today}}"
@@ -643,6 +762,7 @@ matches:
         assert_eq!(config.matches.len(), 2);
         assert_eq!(config.matches[0].triggers, [";mail", ";email"]);
         assert_eq!(config.matches[0].label.as_deref(), Some("Email address"));
+        assert_eq!(config.matches[0].search_terms, ["email", "contact"]);
         assert_eq!(config.matches[1].vars[0].name, "today");
     }
 
@@ -683,6 +803,26 @@ matches:
         );
         let error = format!("{:#}", Config::load_dir(dir.path()).unwrap_err());
         assert!(error.contains("unknown variant") && error.contains("date"));
+    }
+
+    #[test]
+    fn validates_nested_match_references_and_cycles() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("match/nested.yml");
+        write(
+            &path,
+            "matches:\n  - trigger: ';name'\n    replace: 'Silouan'\n  - trigger: ';hello'\n    replace: 'Hello {{person}}'\n    vars:\n      - name: person\n        type: match\n        params:\n          trigger: ';name'\n",
+        );
+        Config::load_dir(dir.path()).unwrap();
+
+        write(
+            &path,
+            "matches:\n  - trigger: ';a'\n    replace: '{{b}}'\n    vars:\n      - name: b\n        type: match\n        params: { trigger: ';b' }\n  - trigger: ';b'\n    replace: '{{a}}'\n    vars:\n      - name: a\n        type: match\n        params: { trigger: ';a' }\n",
+        );
+        assert!(Config::load_dir(dir.path())
+            .unwrap_err()
+            .to_string()
+            .contains("nested match reference cycle"));
     }
 
     #[test]
@@ -727,6 +867,29 @@ matches:
         write(&dir.path().join("config.yml"), "injection_delay_ms: 51\n");
         let error = Config::load_dir(dir.path()).unwrap_err().to_string();
         assert!(error.contains("injection_delay_ms must be between 0 and 50"));
+    }
+
+    #[test]
+    fn loads_and_validates_word_separators() {
+        let dir = TempDir::new().unwrap();
+        write(
+            &dir.path().join("config.yml"),
+            "word_separators: [' ', '.', '🧐']\n",
+        );
+        let config = Config::load_dir(dir.path()).unwrap();
+        assert_eq!(
+            config.settings.word_separator_chars(),
+            Some(vec![' ', '.', '🧐'])
+        );
+
+        write(
+            &dir.path().join("config.yml"),
+            "word_separators: ['too long']\n",
+        );
+        assert!(Config::load_dir(dir.path())
+            .unwrap_err()
+            .to_string()
+            .contains("exactly one character"));
     }
 
     #[test]
@@ -828,6 +991,7 @@ matches:
                 trigger: Some(";sig".into()),
                 triggers: Vec::new(),
                 label: Some("Signature".into()),
+                search_terms: vec!["closing".into()],
                 replace: "Best,\nSilouan".into(),
                 vars: Vec::new(),
                 word: false,
@@ -840,6 +1004,7 @@ matches:
         save_generated(&path, &file).unwrap();
         let loaded = load_generated(&path).unwrap();
         assert_eq!(loaded.matches[0].label.as_deref(), Some("Signature"));
+        assert_eq!(loaded.matches[0].search_terms, ["closing"]);
         assert_eq!(loaded.matches[0].replace, "Best,\nSilouan");
     }
 
