@@ -24,11 +24,19 @@ enum Cmd {
     /// Remove an expansion
     Remove { trigger: String },
     /// List all expansions
-    List,
+    List {
+        /// Emit machine-readable JSON
+        #[arg(long)]
+        json: bool,
+    },
     /// Validate all configuration files without starting the daemon
     Check,
     /// Diagnose configuration, session, permissions, and runtime dependencies
-    Doctor,
+    Doctor {
+        /// Emit machine-readable JSON
+        #[arg(long)]
+        json: bool,
+    },
     /// Show the active application's title, class, and executable
     Detect,
     /// Signal running daemon to reload config
@@ -66,24 +74,21 @@ fn main() -> anyhow::Result<()> {
 fn handle_cmd(cmd: Cmd) -> anyhow::Result<()> {
     match cmd {
         Cmd::Init => init_config()?,
-        Cmd::List => {
+        Cmd::List { json } => {
             let cfg = config::Config::load_default()?;
-            if cfg.matches.is_empty() {
+            let rows = list_entries(&cfg);
+            if json {
+                println!("{}", serde_json::to_string(&rows)?);
+            } else if rows.is_empty() {
                 println!("No expansions configured.");
                 println!("Add one with: snipexpand add /trigger \"expansion text\"");
             } else {
-                let mut rows: Vec<_> = cfg
-                    .matches
-                    .iter()
-                    .flat_map(|item| item.triggers.iter().map(move |trigger| (trigger, item)))
-                    .collect();
-                rows.sort_by_key(|(trigger, _)| trigger.as_str());
-                for (trigger, item) in rows {
+                for row in rows {
                     println!(
                         "{:<20} => {:<36} [{}]",
-                        trigger,
-                        item.replace.replace('\n', "\\n"),
-                        item.source.display()
+                        row.trigger,
+                        row.replacement.replace('\n', "\\n"),
+                        row.source
                     );
                 }
             }
@@ -103,7 +108,7 @@ fn handle_cmd(cmd: Cmd) -> anyhow::Result<()> {
             print_config_warnings(&cfg);
         }
 
-        Cmd::Doctor => doctor(),
+        Cmd::Doctor { json } => doctor(json),
 
         Cmd::Detect => {
             let info = app::detect()?;
@@ -255,35 +260,133 @@ fn write_new(path: &std::path::Path, contents: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn doctor() {
-    let mut failed = false;
-    check_doctor(
-        "Wayland session",
-        std::env::var_os("WAYLAND_DISPLAY").is_some(),
-        &mut failed,
-    );
-    check_doctor("input group", in_group("input"), &mut failed);
-    check_doctor("/dev/uinput writable", can_open_uinput(), &mut failed);
-    check_doctor(
-        "wtype Unicode fallback",
-        command_exists("wtype"),
-        &mut failed,
-    );
-    check_doctor(
-        "configuration",
-        config::Config::load_default().is_ok(),
-        &mut failed,
-    );
-    let running = daemon_status().is_ok();
-    check_doctor("daemon", running, &mut failed);
-    if failed {
+#[derive(Debug, serde::Serialize)]
+struct ListEntry {
+    trigger: String,
+    replacement: String,
+    source: String,
+    generated: bool,
+    editable: bool,
+}
+
+fn list_entries(config: &config::Config) -> Vec<ListEntry> {
+    let generated_path = config::Config::generated_path();
+    let mut rows = config
+        .matches
+        .iter()
+        .flat_map(|item| {
+            let generated = item.source == generated_path;
+            item.triggers.iter().map(move |trigger| ListEntry {
+                trigger: trigger.clone(),
+                replacement: item.replace.clone(),
+                source: item.source.display().to_string(),
+                generated,
+                editable: generated,
+            })
+        })
+        .collect::<Vec<_>>();
+    rows.sort_by(|left, right| left.trigger.cmp(&right.trigger));
+    rows
+}
+
+#[derive(Debug, serde::Serialize)]
+struct DoctorCheck {
+    id: &'static str,
+    label: &'static str,
+    ok: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    detail: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    fix: Option<&'static str>,
+}
+
+#[derive(Debug, serde::Serialize)]
+struct DoctorReport {
+    ok: bool,
+    checks: Vec<DoctorCheck>,
+}
+
+fn doctor(json: bool) {
+    let config_result = config::Config::load_default();
+    let daemon_result = daemon_status();
+    let checks = vec![
+        doctor_check(
+            "wayland_session",
+            "Wayland session",
+            std::env::var_os("WAYLAND_DISPLAY").is_some(),
+            None,
+            "Log in to a Wayland session",
+        ),
+        doctor_check(
+            "input_group",
+            "input group",
+            in_group("input"),
+            None,
+            "Add your user to the input group, then log out and back in",
+        ),
+        doctor_check(
+            "uinput_writable",
+            "/dev/uinput writable",
+            can_open_uinput(),
+            None,
+            "Grant your user write access to /dev/uinput",
+        ),
+        doctor_check(
+            "wtype",
+            "wtype Unicode fallback",
+            command_exists("wtype"),
+            None,
+            "Install wtype",
+        ),
+        doctor_check(
+            "configuration",
+            "configuration",
+            config_result.is_ok(),
+            config_result.err().map(|error| error.to_string()),
+            "Run snipexpand check and correct the reported configuration error",
+        ),
+        doctor_check(
+            "daemon",
+            "daemon",
+            daemon_result.is_ok(),
+            daemon_result.err().map(|error| error.to_string()),
+            "Run snipexpand install or restart the snipexpand user service",
+        ),
+    ];
+    let report = DoctorReport {
+        ok: checks.iter().all(|check| check.ok),
+        checks,
+    };
+
+    if json {
+        println!(
+            "{}",
+            serde_json::to_string(&report).expect("doctor report is serializable")
+        );
+    } else {
+        for check in &report.checks {
+            println!("{} {}", if check.ok { "✓" } else { "✗" }, check.label);
+        }
+    }
+    if !report.ok {
         std::process::exit(1);
     }
 }
 
-fn check_doctor(label: &str, ok: bool, failed: &mut bool) {
-    println!("{} {label}", if ok { "✓" } else { "✗" });
-    *failed |= !ok;
+fn doctor_check(
+    id: &'static str,
+    label: &'static str,
+    ok: bool,
+    detail: Option<String>,
+    fix: &'static str,
+) -> DoctorCheck {
+    DoctorCheck {
+        id,
+        label,
+        ok,
+        detail: (!ok).then_some(detail).flatten(),
+        fix: (!ok).then_some(fix),
+    }
 }
 
 fn command_exists(name: &str) -> bool {
@@ -447,5 +550,48 @@ mod tests {
         assert!(definition.contains("ExecStart=\"/tmp/Snip Expand/%%i/bin\""));
         assert!(definition.contains("Restart=on-failure"));
         assert!(definition.contains("WantedBy=graphical-session.target"));
+    }
+
+    #[test]
+    fn doctor_check_only_exposes_failure_guidance_when_needed() {
+        let passing = doctor_check("daemon", "daemon", true, None, "Restart it");
+        assert!(passing.fix.is_none());
+
+        let failing = doctor_check(
+            "daemon",
+            "daemon",
+            false,
+            Some("not reachable".to_string()),
+            "Restart it",
+        );
+        assert_eq!(failing.detail.as_deref(), Some("not reachable"));
+        assert_eq!(failing.fix, Some("Restart it"));
+    }
+
+    #[test]
+    fn list_entries_are_sorted_and_mark_only_generated_matches_editable() {
+        let generated = config::Config::generated_path();
+        let handwritten = generated.parent().unwrap().join("personal.yml");
+        let make_match = |trigger: &str, source: std::path::PathBuf| config::Match {
+            triggers: vec![trigger.to_string()],
+            replace: format!("{trigger} replacement"),
+            vars: Vec::new(),
+            word: false,
+            left_word: false,
+            right_word: false,
+            propagate_case: false,
+            uppercase_style: config::UppercaseStyle::Uppercase,
+            source,
+        };
+        let config = config::Config {
+            matches: vec![make_match(";z", handwritten), make_match(";a", generated)],
+            ..Default::default()
+        };
+
+        let entries = list_entries(&config);
+
+        assert_eq!(entries[0].trigger, ";a");
+        assert!(entries[0].editable);
+        assert!(!entries[1].editable);
     }
 }
