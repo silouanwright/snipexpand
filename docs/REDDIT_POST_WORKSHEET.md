@@ -173,7 +173,7 @@ Use these facts selectively. Do not place all of them in one post.
 - Application exclusions do not stop global input capture.
 - Browser password fields cannot be detected independently of their browser.
 - Undo is limited to the immediately preceding simple, single-line expansion.
-- Regex triggers, arbitrary scripts, forms, rich text, and a package registry
+- Arbitrary scripts, forms, rich text, and a package registry
   are not currently supported.
 - If discussing Espanso, describe the specific Linux and Wayland problems that
   motivated you. Do not frame the post as an attack on its maintainers.
