@@ -25,6 +25,8 @@ than silently changing their behavior.
 | date `offset` | Full | Signed offset in seconds |
 | nested `match` variable | Full | References another trigger; missing references and cycles are rejected |
 | Multiple files | Full | Recursive `.yml` and `.yaml` discovery |
+| `regex` | Core | Suffix matching with named captures exposed as `{{name}}`; bounded by `regex_max_buffer` |
+| Duplicate triggers | Core | Source-selectable through `paste`; automatic typing requires profile disambiguation |
 
 ## SnipExpand-specific settings
 
@@ -34,6 +36,7 @@ than silently changing their behavior.
 trigger_mode: immediate # or space
 terminators: [space]    # any combination of space, enter, tab
 word_separators: [" ", ".", ","] # optional boundary override
+regex_max_buffer: 256 # 32 to 4096 characters
 injection_backend: auto # auto, wayland, or uinput; restart after changing
 injection_delay_ms: 1   # 0 to 50; shared fallback
 wayland_injection_delay_ms: 0 # tested Omarchy/Hyprland default
@@ -42,15 +45,19 @@ injection_settle_ms: 10 # 0 to 100; one-time pause before trigger deletion
 undo_enabled: true      # immediate Backspace restores a plain expansion's trigger
 app_exclusions:         # regex filters; entries are OR, fields are AND
   - class: "^1Password$"
+app_profiles:           # first matching profile wins
+  - name: Browser
+    filter: { class: "firefox" }
+    include_match_files: [browser.yml]
+    trigger_mode: space
 ```
 
 ## Unsupported and rejected
 
-- Regex triggers
 - Shell, script, clipboard, random, echo, choice, and form variables
 - Forms, images, HTML, and Markdown effects
 - Imports and anchors
-- Espanso per-app config overrides (SnipExpand supports global app exclusions)
+- Espanso's separate per-app config files; SnipExpand uses `app_profiles`
 - Per-match injection backends
 - Espanso Hub package metadata
 

@@ -39,6 +39,9 @@ pub struct Settings {
     /// Optional Espanso-compatible characters that delimit words.
     #[serde(default)]
     pub word_separators: Option<Vec<String>>,
+    /// Maximum rolling character buffer used by regex triggers.
+    #[serde(default = "default_regex_max_buffer")]
+    pub regex_max_buffer: usize,
     /// Injection transport. Auto prefers Wayland and falls back to uinput.
     #[serde(default)]
     pub injection_backend: InjectionBackend,
@@ -56,6 +59,8 @@ pub struct Settings {
     pub injection_settle_ms: u64,
     #[serde(default)]
     pub app_exclusions: Vec<AppFilter>,
+    #[serde(default)]
+    pub app_profiles: Vec<AppProfile>,
     #[serde(default = "default_true")]
     pub undo_enabled: bool,
 }
@@ -66,12 +71,14 @@ impl Default for Settings {
             trigger_mode: TriggerMode::Immediate,
             terminators: default_terminators(),
             word_separators: None,
+            regex_max_buffer: default_regex_max_buffer(),
             injection_backend: InjectionBackend::Auto,
             injection_delay_ms: default_injection_delay_ms(),
             wayland_injection_delay_ms: None,
             uinput_injection_delay_ms: None,
             injection_settle_ms: default_injection_settle_ms(),
             app_exclusions: Vec::new(),
+            app_profiles: Vec::new(),
             undo_enabled: true,
         }
     }
@@ -85,12 +92,27 @@ fn default_injection_delay_ms() -> u64 {
     1
 }
 
+fn default_regex_max_buffer() -> usize {
+    256
+}
+
 fn default_injection_settle_ms() -> u64 {
     10
 }
 
 fn default_true() -> bool {
     true
+}
+
+fn validate_word_separators(values: Option<&[String]>) -> Result<()> {
+    if let Some(values) = values {
+        for value in values {
+            if value.chars().count() != 1 {
+                bail!("word_separators entries must contain exactly one character");
+            }
+        }
+    }
+    Ok(())
 }
 
 impl Settings {
@@ -127,6 +149,12 @@ impl Settings {
         }
         .unwrap_or(self.injection_delay_ms)
     }
+
+    pub fn profile_index(&self, app: &crate::app::AppInfo) -> Option<usize> {
+        self.app_profiles
+            .iter()
+            .position(|profile| profile.matches(app))
+    }
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -138,6 +166,76 @@ pub struct AppFilter {
     pub class: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub exec: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AppProfile {
+    pub name: String,
+    pub filter: AppFilter,
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    #[serde(default)]
+    pub include_match_files: Vec<String>,
+    #[serde(default)]
+    pub exclude_match_files: Vec<String>,
+    #[serde(default)]
+    pub trigger_mode: Option<TriggerMode>,
+    #[serde(default)]
+    pub terminators: Option<Vec<Terminator>>,
+    #[serde(default)]
+    pub word_separators: Option<Vec<String>>,
+    #[serde(default)]
+    pub injection_delay_ms: Option<u64>,
+    #[serde(default)]
+    pub injection_settle_ms: Option<u64>,
+}
+
+impl AppProfile {
+    fn validate(&self) -> Result<()> {
+        if self.name.trim().is_empty() {
+            bail!("app profile name must not be empty");
+        }
+        self.filter.validate()?;
+        for path in self
+            .include_match_files
+            .iter()
+            .chain(&self.exclude_match_files)
+        {
+            let path = Path::new(path);
+            if path.is_absolute()
+                || path
+                    .components()
+                    .any(|part| part == std::path::Component::ParentDir)
+            {
+                bail!("app profile match files must be relative paths below match/");
+            }
+        }
+        if self.injection_delay_ms.is_some_and(|value| value > 50) {
+            bail!("app profile injection_delay_ms must be between 0 and 50");
+        }
+        if self.injection_settle_ms.is_some_and(|value| value > 100) {
+            bail!("app profile injection_settle_ms must be between 0 and 100");
+        }
+        validate_word_separators(self.word_separators.as_deref())
+    }
+
+    pub fn matches(&self, app: &crate::app::AppInfo) -> bool {
+        self.filter.matches(app)
+    }
+
+    fn includes_source(&self, source: &Path) -> bool {
+        let included = self.include_match_files.is_empty()
+            || self
+                .include_match_files
+                .iter()
+                .any(|path| source.ends_with(path));
+        included
+            && !self
+                .exclude_match_files
+                .iter()
+                .any(|path| source.ends_with(path))
+    }
 }
 
 impl AppFilter {
@@ -178,6 +276,7 @@ fn field_matches(pattern: Option<&str>, value: Option<&str>) -> bool {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Match {
     pub triggers: Vec<String>,
+    pub regex: Option<String>,
     pub label: Option<String>,
     pub search_terms: Vec<String>,
     pub replace: String,
@@ -242,6 +341,12 @@ pub struct UnreachableTrigger {
     pub blocking_source: PathBuf,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DuplicateTrigger {
+    pub trigger: String,
+    pub sources: Vec<PathBuf>,
+}
+
 #[derive(Debug, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct MatchFile {
@@ -258,6 +363,8 @@ struct MatchDefinition {
     trigger: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     triggers: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    regex: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     label: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -349,6 +456,7 @@ impl Config {
             let vars = merge_variables(path, &file.global_vars, &definition.vars)?;
             self.matches.push(Match {
                 triggers,
+                regex: definition.regex,
                 label: definition.label,
                 search_terms: definition.search_terms,
                 replace: definition.replace,
@@ -386,17 +494,20 @@ impl Config {
         if self.settings.injection_settle_ms > 100 {
             bail!("injection_settle_ms must be between 0 and 100");
         }
-        if let Some(separators) = &self.settings.word_separators {
-            for separator in separators {
-                if separator.chars().count() != 1 {
-                    bail!("word_separators entries must contain exactly one character");
-                }
-            }
+        if !(32..=4096).contains(&self.settings.regex_max_buffer) {
+            bail!("regex_max_buffer must be between 32 and 4096");
         }
+        validate_word_separators(self.settings.word_separators.as_deref())?;
         for filter in &self.settings.app_exclusions {
             filter.validate()?;
         }
-        let mut seen = HashMap::<&str, &Path>::new();
+        let mut profile_names = HashSet::new();
+        for profile in &self.settings.app_profiles {
+            profile.validate()?;
+            if !profile_names.insert(profile.name.as_str()) {
+                bail!("duplicate app profile name '{}'", profile.name);
+            }
+        }
         for item in &self.matches {
             if !item.propagate_case && item.uppercase_style != UppercaseStyle::Uppercase {
                 bail!(
@@ -408,12 +519,12 @@ impl Config {
                 if trigger.is_empty() {
                     bail!("{}: trigger must not be empty", item.source.display());
                 }
-                if let Some(first_source) = seen.insert(trigger, &item.source) {
-                    bail!(
-                        "duplicate trigger '{trigger}' in {} (first defined in {})",
-                        item.source.display(),
-                        first_source.display()
-                    );
+            }
+            if let Some(pattern) = &item.regex {
+                let regex = regex::Regex::new(&format!("(?:{pattern})$"))
+                    .with_context(|| format!("{}: invalid regex", item.source.display()))?;
+                if regex.is_match("") {
+                    bail!("{}: regex must not match empty text", item.source.display());
                 }
             }
             let mut names = HashSet::new();
@@ -435,6 +546,7 @@ impl Config {
             }
         }
         self.validate_match_references()?;
+        self.validate_profile_references()?;
         Ok(())
     }
 
@@ -444,11 +556,47 @@ impl Config {
             .iter()
             .enumerate()
             .flat_map(|(index, item)| item.triggers.iter().map(move |trigger| (trigger, index)))
-            .collect::<HashMap<_, _>>();
+            .fold(
+                HashMap::<&String, Vec<usize>>::new(),
+                |mut map, (trigger, index)| {
+                    map.entry(trigger).or_default().push(index);
+                    map
+                },
+            );
         let mut visiting = HashSet::new();
         let mut visited = HashSet::new();
         for index in 0..self.matches.len() {
             validate_match_reference(index, self, &by_trigger, &mut visiting, &mut visited)?;
+        }
+        Ok(())
+    }
+
+    fn validate_profile_references(&self) -> Result<()> {
+        for profile in &self.settings.app_profiles {
+            for item in self
+                .matches
+                .iter()
+                .filter(|item| profile.includes_source(&item.source))
+            {
+                for variable in item
+                    .vars
+                    .iter()
+                    .filter(|variable| variable.kind == VariableKind::Match)
+                {
+                    let target = self
+                        .matches
+                        .iter()
+                        .find(|candidate| candidate.triggers.contains(&variable.params.trigger))
+                        .expect("nested match references were validated");
+                    if !profile.includes_source(&target.source) {
+                        bail!(
+                            "app profile '{}': nested trigger '{}' is excluded",
+                            profile.name,
+                            variable.params.trigger
+                        );
+                    }
+                }
+            }
         }
         Ok(())
     }
@@ -458,6 +606,20 @@ impl Config {
             .app_exclusions
             .iter()
             .any(|filter| filter.matches(app))
+    }
+
+    pub fn matches_for_profile(&self, index: Option<usize>) -> Vec<Match> {
+        let Some(profile) = index.and_then(|index| self.settings.app_profiles.get(index)) else {
+            return self.matches.clone();
+        };
+        if !profile.enabled {
+            return Vec::new();
+        }
+        self.matches
+            .iter()
+            .filter(|item| profile.includes_source(&item.source))
+            .cloned()
+            .collect()
     }
 
     /// Find longer triggers that immediate mode can never reach because a
@@ -499,6 +661,28 @@ impl Config {
         unreachable
     }
 
+    pub fn duplicate_triggers(&self) -> Vec<DuplicateTrigger> {
+        let mut grouped = HashMap::<&str, Vec<PathBuf>>::new();
+        for item in &self.matches {
+            for trigger in &item.triggers {
+                grouped
+                    .entry(trigger)
+                    .or_default()
+                    .push(item.source.clone());
+            }
+        }
+        let mut duplicates = grouped
+            .into_iter()
+            .filter(|(_, sources)| sources.len() > 1)
+            .map(|(trigger, sources)| DuplicateTrigger {
+                trigger: trigger.to_string(),
+                sources,
+            })
+            .collect::<Vec<_>>();
+        duplicates.sort_by(|left, right| left.trigger.cmp(&right.trigger));
+        duplicates
+    }
+
     pub fn add_generated(
         trigger: &str,
         expansion: &str,
@@ -537,6 +721,7 @@ impl Config {
         file.matches.push(MatchDefinition {
             trigger: Some(trigger.to_string()),
             triggers: Vec::new(),
+            regex: None,
             label: updated_label(label, previous_label),
             search_terms: if search_terms.is_empty() {
                 previous_search_terms
@@ -571,7 +756,7 @@ impl Config {
 fn validate_match_reference(
     index: usize,
     config: &Config,
-    by_trigger: &HashMap<&String, usize>,
+    by_trigger: &HashMap<&String, Vec<usize>>,
     visiting: &mut HashSet<usize>,
     visited: &mut HashSet<usize>,
 ) -> Result<()> {
@@ -588,7 +773,7 @@ fn validate_match_reference(
         if variable.kind != VariableKind::Match {
             continue;
         }
-        let Some(&target) = by_trigger.get(&variable.params.trigger) else {
+        let Some(targets) = by_trigger.get(&variable.params.trigger) else {
             bail!(
                 "{}: match variable '{}' references unknown trigger '{}'",
                 config.matches[index].source.display(),
@@ -596,6 +781,15 @@ fn validate_match_reference(
                 variable.params.trigger
             );
         };
+        if targets.len() != 1 {
+            bail!(
+                "{}: match variable '{}' references ambiguous trigger '{}'",
+                config.matches[index].source.display(),
+                variable.name,
+                variable.params.trigger
+            );
+        }
+        let target = targets[0];
         validate_match_reference(target, config, by_trigger, visiting, visited)?;
     }
     visiting.remove(&index);
@@ -635,13 +829,25 @@ impl MatchDefinition {
     }
 
     fn normalized_triggers(&self, path: &Path) -> Result<Vec<String>> {
+        if self.regex.is_some() && (self.trigger.is_some() || !self.triggers.is_empty()) {
+            bail!(
+                "{}: a match must use either 'trigger', 'triggers', or 'regex'",
+                path.display()
+            );
+        }
+        if self.regex.as_deref().is_some_and(str::is_empty) {
+            bail!("{}: regex must not be empty", path.display());
+        }
+        if self.regex.is_some() {
+            return Ok(Vec::new());
+        }
         match (&self.trigger, self.triggers.is_empty()) {
             (Some(_), false) => bail!(
                 "{}: a match must use either 'trigger' or 'triggers', not both",
                 path.display()
             ),
             (None, true) => bail!(
-                "{}: a match requires either 'trigger' or 'triggers'",
+                "{}: a match requires 'trigger', 'triggers', or 'regex'",
                 path.display()
             ),
             _ => Ok(self.all_triggers().into_iter().map(str::to_owned).collect()),
@@ -826,6 +1032,33 @@ matches:
     }
 
     #[test]
+    fn loads_regex_triggers_and_rejects_invalid_patterns() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("match/regex.yml");
+        write(
+            &path,
+            "matches:\n  - regex: 'issue (?P<number>\\d+)'\n    replace: 'Issue #{{number}}'\n",
+        );
+        let config = Config::load_dir(dir.path()).unwrap();
+        assert_eq!(
+            config.matches[0].regex.as_deref(),
+            Some(r"issue (?P<number>\d+)")
+        );
+
+        write(&path, "matches:\n  - regex: '[bad'\n    replace: 'x'\n");
+        assert!(Config::load_dir(dir.path())
+            .unwrap_err()
+            .to_string()
+            .contains("invalid regex"));
+
+        write(&path, "matches:\n  - regex: 'a*'\n    replace: 'x'\n");
+        assert!(Config::load_dir(dir.path())
+            .unwrap_err()
+            .to_string()
+            .contains("must not match empty text"));
+    }
+
+    #[test]
     fn loads_case_propagation_and_rejects_ineffective_style() {
         let dir = TempDir::new().unwrap();
         write(
@@ -944,7 +1177,45 @@ matches:
     }
 
     #[test]
-    fn rejects_duplicate_triggers_across_files() {
+    fn app_profiles_select_settings_and_match_files() {
+        let dir = TempDir::new().unwrap();
+        write(
+            &dir.path().join("config.yml"),
+            "app_profiles:\n  - name: Browser\n    filter:\n      class: 'firefox'\n    include_match_files: [browser.yml]\n    trigger_mode: space\n    injection_delay_ms: 2\n",
+        );
+        write(
+            &dir.path().join("match/browser.yml"),
+            "matches:\n  - trigger: ';web'\n    replace: 'web'\n",
+        );
+        write(
+            &dir.path().join("match/general.yml"),
+            "matches:\n  - trigger: ';all'\n    replace: 'all'\n",
+        );
+        let config = Config::load_dir(dir.path()).unwrap();
+        let profile = config.settings.profile_index(&crate::app::AppInfo {
+            class: Some("firefox".into()),
+            ..Default::default()
+        });
+        assert_eq!(profile, Some(0));
+        assert_eq!(config.matches_for_profile(profile).len(), 1);
+        assert_eq!(config.matches_for_profile(profile)[0].triggers, [";web"]);
+    }
+
+    #[test]
+    fn app_profiles_reject_unsafe_paths() {
+        let dir = TempDir::new().unwrap();
+        write(
+            &dir.path().join("config.yml"),
+            "app_profiles:\n  - name: Browser\n    filter: { class: firefox }\n    include_match_files: ['../secret.yml']\n",
+        );
+        assert!(Config::load_dir(dir.path())
+            .unwrap_err()
+            .to_string()
+            .contains("relative paths"));
+    }
+
+    #[test]
+    fn reports_duplicate_triggers_across_files() {
         let dir = TempDir::new().unwrap();
         write(
             &dir.path().join("match/a.yml"),
@@ -954,8 +1225,11 @@ matches:
             &dir.path().join("match/b.yml"),
             "matches:\n  - trigger: ';same'\n    replace: 'b'\n",
         );
-        let error = Config::load_dir(dir.path()).unwrap_err().to_string();
-        assert!(error.contains("duplicate trigger ';same'"));
+        let config = Config::load_dir(dir.path()).unwrap();
+        let duplicates = config.duplicate_triggers();
+        assert_eq!(duplicates.len(), 1);
+        assert_eq!(duplicates[0].trigger, ";same");
+        assert_eq!(duplicates[0].sources.len(), 2);
     }
 
     #[test]
@@ -990,6 +1264,7 @@ matches:
             matches: vec![MatchDefinition {
                 trigger: Some(";sig".into()),
                 triggers: Vec::new(),
+                regex: None,
                 label: Some("Signature".into()),
                 search_terms: vec!["closing".into()],
                 replace: "Best,\nSilouan".into(),

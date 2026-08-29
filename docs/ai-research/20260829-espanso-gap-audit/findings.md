@@ -22,11 +22,12 @@ plugin now supplies search, insertion, editing, diagnostics, and restart UI.
 4. Espanso lets users configure `word_separators`. This is a small but useful
    improvement for punctuation-heavy triggers, code, and language-specific
    behavior.
-5. Duplicate triggers open a chooser in Espanso. This is useful, but it changes
-   deterministic expansion into a focus-sensitive UI operation. SnipExpand
-   should continue rejecting duplicates until that interaction is designed.
-6. Per-application profiles and regex triggers remain valuable, substantial
-   P1 work. The existing backlog placement is correct.
+5. Duplicate triggers open a chooser in Espanso. SnipExpand now allows them for
+   picker workflows while refusing ambiguous typed expansion. App profiles can
+   narrow a trigger to one active match, and `paste --source` selects an exact
+   entry without arbitrary ordering.
+6. Per-application profiles and bounded regex triggers with named captures are
+   now implemented.
 
 ## Features that should stay later or out of scope
 
@@ -43,10 +44,5 @@ plugin now supplies search, insertion, editing, diagnostics, and restart UI.
 
 ## Recommended order
 
-1. `search_terms`
-2. Safe nested matches
-3. Pause, resume, and toggle over IPC
-4. Configurable `word_separators`
-5. Per-application profiles
-6. Regex triggers
-7. Duplicate-trigger disambiguation only if users request it
+All seven recommendations were implemented. Forms, rich text, executable
+variables, and clipboard-backed behavior remain intentionally deferred.

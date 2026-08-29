@@ -17,7 +17,23 @@ pub enum IpcCmd {
     Enable,
     Disable,
     Toggle,
-    Paste(String),
+    Paste {
+        trigger: String,
+        source: Option<String>,
+    },
+}
+
+#[derive(Deserialize)]
+struct PasteRequest {
+    trigger: String,
+    source: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum PasteRequestWire {
+    Trigger(String),
+    Request(PasteRequest),
 }
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -62,8 +78,20 @@ impl IpcServer {
                 "disable" => return Ok((IpcCmd::Disable, reader.into_inner())),
                 "toggle" => return Ok((IpcCmd::Toggle, reader.into_inner())),
                 value if value.starts_with("paste\t") => {
-                    let trigger = serde_json::from_str(&value[6..])?;
-                    return Ok((IpcCmd::Paste(trigger), reader.into_inner()));
+                    let request = match serde_json::from_str(&value[6..])? {
+                        PasteRequestWire::Trigger(trigger) => PasteRequest {
+                            trigger,
+                            source: None,
+                        },
+                        PasteRequestWire::Request(request) => request,
+                    };
+                    return Ok((
+                        IpcCmd::Paste {
+                            trigger: request.trigger,
+                            source: request.source,
+                        },
+                        reader.into_inner(),
+                    ));
                 }
                 other => {
                     // Log and discard. Do not let a bad client kill the daemon.
@@ -143,10 +171,28 @@ mod tests {
         let server = IpcServer::new(&path).await.unwrap();
         let path_clone = path.clone();
         tokio::spawn(async move {
+            send_cmd(
+                &path_clone,
+                "paste\t{\"trigger\":\";mail\",\"source\":null}",
+            )
+            .await
+            .unwrap();
+        });
+        let (cmd, _) = server.accept().await.unwrap();
+        assert!(matches!(cmd, IpcCmd::Paste { trigger, source: None } if trigger == ";mail"));
+    }
+
+    #[tokio::test]
+    async fn test_server_accepts_legacy_paste_command() {
+        let dir = TempDir::new().unwrap();
+        let path = tmp_sock(&dir);
+        let server = IpcServer::new(&path).await.unwrap();
+        let path_clone = path.clone();
+        tokio::spawn(async move {
             send_cmd(&path_clone, "paste\t\";mail\"").await.unwrap();
         });
         let (cmd, _) = server.accept().await.unwrap();
-        assert!(matches!(cmd, IpcCmd::Paste(trigger) if trigger == ";mail"));
+        assert!(matches!(cmd, IpcCmd::Paste { trigger, source: None } if trigger == ";mail"));
     }
 
     #[tokio::test]

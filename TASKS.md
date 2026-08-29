@@ -50,7 +50,7 @@ These are the strongest candidates for the next feature releases.
   - Include the enabled state in `status --json` and the Omarchy plugin.
   - Consider a configurable double-tap modifier only after CLI and plugin
     controls prove insufficient.
-- [ ] Add per-application profiles.
+- [x] Add per-application profiles.
   - Allow different match sets, trigger modes, and injection timing by title,
     class, or executable.
   - Preserve the current exclusion syntax as the simple path.
@@ -59,7 +59,7 @@ These are the strongest candidates for the next feature releases.
   - Import the supported subset without rewriting the original configuration.
   - Report every skipped or incompatible field with its file and match.
   - Make the result pass `snipexpand check` before writing it.
-- [ ] Add regex triggers with capture variables.
+- [x] Add regex triggers with capture variables.
   - Bound the input buffer and regex execution so matching stays predictable.
   - Define deletion, boundaries, case propagation, and overlapping matches
     before accepting the syntax.
@@ -71,11 +71,10 @@ These are the strongest candidates for the next feature releases.
   - Add Espanso-compatible `word_separators` for punctuation, programming, and
     language-specific workflows.
   - Preserve the current Unicode-aware default when the setting is absent.
-- [ ] Handle duplicate triggers deliberately.
-  - Keep duplicates as validation errors until typed-trigger disambiguation has
-    a reliable chooser and focus-restoration path.
-  - Let the search palette expose separately labeled snippets without weakening
-    deterministic keyboard expansion.
+- [x] Handle duplicate triggers deliberately.
+  - Automatic typing expands only when app profiles leave one match active.
+  - Let launchers select an exact duplicate with its source path through
+    `snipexpand paste --source`.
 - [ ] Add named snippet groups and quick enable or disable controls.
   - Support global and application-scoped groups.
   - Expose group state through the CLI and status JSON.

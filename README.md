@@ -133,6 +133,10 @@ matches:
   - trigger: ";today"
     replace: "{{today}}"
 
+  # Named regex captures become replacement variables.
+  - regex: "issue-(?P<number>\\d{3})"
+    replace: "Issue #{{number}}"
+
   # Reuse another snippet without running commands.
   - trigger: ";name"
     replace: "Your Name"
@@ -158,6 +162,9 @@ terminators: [space]       # any of: space, enter, tab
 # Optional. Override which characters delimit word-boundary matches.
 # word_separators: [" ", ".", ",", "!", "?"]
 
+# Maximum characters retained while evaluating regex triggers.
+regex_max_buffer: 256
+
 # Prefer native Wayland injection and fall back to uinput.
 injection_backend: auto    # auto | wayland | uinput
 
@@ -174,6 +181,15 @@ undo_enabled: true         # true | false
 app_exclusions:
   - class: "^1Password$"
   - class: "^org\\.keepassxc\\.KeePassXC$"
+
+# Optional. The first matching profile overrides behavior for that application.
+app_profiles:
+  - name: Browser
+    filter:
+      class: "^(firefox|chromium)$"
+    include_match_files: [browser.yml]
+    trigger_mode: space
+    injection_delay_ms: 1
 ```
 
 Run `snipexpand detect` while an application is focused to find the title,
@@ -202,6 +218,11 @@ doctor                           Diagnose setup and runtime requirements
 install                          Install and start the user service
 uninstall                        Remove the service; preserve configuration
 ```
+
+Duplicate triggers may coexist for picker use. Automatic typing expands only
+when the active app profile leaves one matching snippet. A picker can select an
+exact duplicate with `paste --source PATH TRIGGER`, using the `source` returned
+by `list --json`.
 
 ## Limitations
 

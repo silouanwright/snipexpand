@@ -63,6 +63,9 @@ struct InputState {
     undo: Option<Undo>,
     pending_undo: Option<Undo>,
     pending_expansion: Option<PendingExpansion>,
+    active_profile: Option<usize>,
+    profile_initialized: bool,
+    last_profile_check: Option<std::time::Instant>,
 }
 
 impl InputState {
@@ -139,6 +142,7 @@ pub async fn run(config: Config) -> Result<()> {
             cfg.settings.trigger_mode,
             cfg.settings.terminator_chars(),
             cfg.settings.word_separator_chars(),
+            cfg.settings.regex_max_buffer,
         )
     };
 
@@ -220,6 +224,7 @@ pub async fn run(config: Config) -> Result<()> {
                             cancel_input_context(&mut expander, &mut input);
                             continue;
                         }
+                        refresh_app_profile(&config, &mut expander, &injector, &mut input);
                         match ev.code {
                             _ if ev.value == 0 && ev.code == KEY_BACKSPACE => {
                                 if let Some(previous) = input.pending_undo.take() {
@@ -254,14 +259,14 @@ pub async fn run(config: Config) -> Result<()> {
 
             Some(_) = watch_rx.recv() => {
                 tracing::info!("Config changed, reloading");
-                reload_config(&config, &mut expander, &injector);
+                reload_config(&config, &mut expander, &injector, &mut input);
             }
 
             cmd = ipc_server.accept() => {
                 match cmd {
                     Ok((IpcCmd::Reload, mut stream)) => {
                         tracing::info!("Reload requested via IPC");
-                        reload_config(&config, &mut expander, &injector);
+                        reload_config(&config, &mut expander, &injector, &mut input);
                         let _ = stream.write_all(b"ok\n").await;
                     }
                     Ok((IpcCmd::Status, mut stream)) => {
@@ -296,11 +301,15 @@ pub async fn run(config: Config) -> Result<()> {
                         let response: &[u8] = if enabled { b"enabled\n" } else { b"disabled\n" };
                         let _ = stream.write_all(response).await;
                     }
-                    Ok((IpcCmd::Paste(trigger), mut stream)) => {
+                    Ok((IpcCmd::Paste { trigger, source }, mut stream)) => {
                         cancel_input_context(&mut expander, &mut input);
+                        input.last_profile_check = None;
+                        refresh_app_profile(&config, &mut expander, &injector, &mut input);
                         if !enabled {
                             let _ = stream.write_all(b"error: expansion is disabled\n").await;
-                        } else if let Some(expansion) = expander.expansion_for_trigger(&trigger) {
+                        } else if source.is_none() && expander.trigger_is_ambiguous(&trigger) {
+                            let _ = stream.write_all(b"error: trigger is ambiguous; provide --source\n").await;
+                        } else if let Some(expansion) = expander.expansion_for_trigger(&trigger, source.as_deref()) {
                             input.undo = inject_expansion(&injector, &config, expansion);
                             let _ = stream.write_all(b"ok\n").await;
                         } else {
@@ -321,7 +330,7 @@ pub async fn run(config: Config) -> Result<()> {
             }
             _ = sig_usr1.recv() => {
                 tracing::info!("SIGUSR1 received, reloading config");
-                reload_config(&config, &mut expander, &injector);
+                reload_config(&config, &mut expander, &injector, &mut input);
             }
         }
     }
@@ -515,7 +524,12 @@ fn wayland_text_characters(config: &Config) -> String {
     text
 }
 
-fn reload_config(config: &Arc<Mutex<Config>>, expander: &mut Expander, injector: &Injector) {
+fn reload_config(
+    config: &Arc<Mutex<Config>>,
+    expander: &mut Expander,
+    injector: &Injector,
+    input: &mut InputState,
+) {
     match Config::load_default() {
         Ok(new_cfg) => {
             let (backend_changed, text_characters_changed) = {
@@ -533,6 +547,7 @@ fn reload_config(config: &Arc<Mutex<Config>>, expander: &mut Expander, injector:
                 new_cfg.settings.trigger_mode,
                 new_cfg.settings.terminator_chars(),
                 new_cfg.settings.word_separator_chars(),
+                new_cfg.settings.regex_max_buffer,
             );
             injector.set_delay_ms(new_cfg.settings.injection_delay_for(injector.backend()));
             injector.set_settle_ms(new_cfg.settings.injection_settle_ms);
@@ -544,6 +559,8 @@ fn reload_config(config: &Arc<Mutex<Config>>, expander: &mut Expander, injector:
                 }
             }
             *config.lock().unwrap() = new_cfg;
+            input.profile_initialized = false;
+            input.last_profile_check = None;
             log_config_warnings(&config.lock().unwrap());
             tracing::info!("Config reloaded");
         }
@@ -551,7 +568,95 @@ fn reload_config(config: &Arc<Mutex<Config>>, expander: &mut Expander, injector:
     }
 }
 
+fn refresh_app_profile(
+    config: &Arc<Mutex<Config>>,
+    expander: &mut Expander,
+    injector: &Injector,
+    input: &mut InputState,
+) {
+    let has_profiles = !config.lock().unwrap().settings.app_profiles.is_empty();
+    if !has_profiles {
+        return;
+    }
+    if input
+        .last_profile_check
+        .is_some_and(|checked| checked.elapsed() < std::time::Duration::from_millis(250))
+    {
+        return;
+    }
+    input.last_profile_check = Some(std::time::Instant::now());
+    let profile = match crate::app::detect() {
+        Ok(app) => config.lock().unwrap().settings.profile_index(&app),
+        Err(error) => {
+            tracing::warn!("Could not evaluate app profiles: {}", error);
+            None
+        }
+    };
+    if input.profile_initialized && profile == input.active_profile {
+        return;
+    }
+
+    let cfg = config.lock().unwrap();
+    let selected = profile.and_then(|index| cfg.settings.app_profiles.get(index));
+    let trigger_mode = selected
+        .and_then(|profile| profile.trigger_mode)
+        .unwrap_or(cfg.settings.trigger_mode);
+    let terminators = selected
+        .and_then(|profile| profile.terminators.as_ref())
+        .map(|values| {
+            values
+                .iter()
+                .map(|value| match value {
+                    crate::config::Terminator::Space => ' ',
+                    crate::config::Terminator::Enter => '\n',
+                    crate::config::Terminator::Tab => '\t',
+                })
+                .collect()
+        })
+        .unwrap_or_else(|| cfg.settings.terminator_chars());
+    let word_separators = selected
+        .and_then(|profile| profile.word_separators.as_ref())
+        .map(|values| {
+            values
+                .iter()
+                .map(|value| {
+                    value
+                        .chars()
+                        .next()
+                        .expect("profile separators were validated")
+                })
+                .collect()
+        })
+        .or_else(|| cfg.settings.word_separator_chars());
+    expander.update_configured(
+        cfg.matches_for_profile(profile),
+        trigger_mode,
+        terminators,
+        word_separators,
+        cfg.settings.regex_max_buffer,
+    );
+    injector.set_delay_ms(
+        selected
+            .and_then(|profile| profile.injection_delay_ms)
+            .unwrap_or_else(|| cfg.settings.injection_delay_for(injector.backend())),
+    );
+    injector.set_settle_ms(
+        selected
+            .and_then(|profile| profile.injection_settle_ms)
+            .unwrap_or(cfg.settings.injection_settle_ms),
+    );
+    input.active_profile = profile;
+    input.profile_initialized = true;
+}
+
 fn log_config_warnings(config: &Config) {
+    for duplicate in config.duplicate_triggers() {
+        tracing::warn!(
+            trigger = duplicate.trigger,
+            matches = duplicate.sources.len(),
+            "Duplicate trigger requires a source selection or an app profile that leaves one match active"
+        );
+    }
     for warning in config.unreachable_triggers() {
         tracing::warn!(
             trigger = warning.trigger,

@@ -38,7 +38,7 @@ match files.
    explicit reload is useful.
 7. If validation fails, report the exact error and do not leave a knowingly
    invalid configuration in place.
-8. Do not add shell commands, scripts, forms, regex triggers, imports, or other
+8. Do not add shell commands, scripts, forms, imports, or other
    unsupported Espanso fields. SnipExpand rejects unknown fields.
 
 ## Simple CLI operations
@@ -107,11 +107,15 @@ matches:
     propagate_case: true
     uppercase_style: capitalize_words
     replace: "good morning"
+
+  - regex: "issue-(?P<number>\\d{3})"
+    replace: "Issue #{{number}}"
 ```
 
 Supported match fields:
 
 - `trigger` or `triggers`
+- `regex` with named captures such as `(?P<number>...)`
 - `replace`
 - `label` and `search_terms`
 - `word`, `left_word`, and `right_word`
@@ -122,6 +126,11 @@ Supported match fields:
 - nested-match `params.trigger`, with cycles rejected during validation
 
 The first `$|$` in a replacement sets the final cursor position.
+
+Duplicate triggers are allowed for picker workflows. Typed expansion requires
+an app profile to leave only one active match. Use the exact `source` from
+`snipexpand list --json` with `snipexpand paste --source PATH TRIGGER` to choose
+a duplicate explicitly.
 
 ## Trigger behavior
 

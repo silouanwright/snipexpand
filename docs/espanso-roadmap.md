@@ -37,9 +37,9 @@ SnipExpand should preserve four small boundaries inside one crate:
 | Capability | Decision pressure |
 | --- | --- |
 | Clipboard backend for long text | Faster and more complete Unicode, but clipboard preservation and password-manager behavior need careful design |
-| Regex triggers and capture variables | Powerful for structured input, but require bounded buffers and predictable deletion semantics |
-| Per-app overrides beyond exclusion | Useful for injection timing and match sets after exclusions prove the detector |
-| Nested safe variables | Useful once the rendering boundary is explicit; dependency cycles need validation |
+| Regex triggers and capture variables | Implemented with a configurable bounded buffer and named captures |
+| Per-app overrides beyond exclusion | Implemented as first-match profiles for match files and behavioral overrides |
+| Nested safe variables | Implemented with missing-reference, ambiguity, and cycle validation |
 | Package import/export | Start with ordinary directories or Git before building a registry |
 | Search metadata | Add Espanso-compatible `search_terms` now that labels and the Omarchy search plugin exist |
 | Pause and resume | The existing IPC and plugin make explicit controls inexpensive; defer a global keyboard gesture |

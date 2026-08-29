@@ -61,6 +61,9 @@ enum Cmd {
         /// Wait for a launcher or panel to close before inserting
         #[arg(long, default_value_t = 150)]
         delay_ms: u64,
+        /// Select a specific match file when the trigger is duplicated
+        #[arg(long)]
+        source: Option<String>,
         trigger: String,
     },
     /// Show daemon status
@@ -176,14 +179,18 @@ fn handle_cmd(cmd: Cmd) -> anyhow::Result<()> {
         Cmd::Disable => set_daemon_enabled("disable")?,
         Cmd::Toggle => set_daemon_enabled("toggle")?,
 
-        Cmd::Paste { delay_ms, trigger } => {
+        Cmd::Paste {
+            delay_ms,
+            source,
+            trigger,
+        } => {
             if delay_ms > 2000 {
                 anyhow::bail!("delay-ms must be between 0 and 2000");
             }
             std::thread::sleep(std::time::Duration::from_millis(delay_ms));
-            let response =
-                send_daemon_command(&format!("paste\t{}", serde_json::to_string(&trigger)?))
-                    .map_err(|error| anyhow::anyhow!("Could not reach daemon: {error}"))?;
+            let request = serde_json::json!({ "trigger": trigger, "source": source });
+            let response = send_daemon_command(&format!("paste\t{request}"))
+                .map_err(|error| anyhow::anyhow!("Could not reach daemon: {error}"))?;
             if response != "ok" {
                 anyhow::bail!("{}", response.strip_prefix("error: ").unwrap_or(&response));
             }
@@ -236,6 +243,13 @@ fn set_daemon_enabled(command: &str) -> anyhow::Result<()> {
 }
 
 fn print_config_warnings(config: &config::Config) {
+    for duplicate in config.duplicate_triggers() {
+        println!(
+            "WARNING: trigger '{}' has {} matches; automatic typing requires an app profile to leave one match active",
+            duplicate.trigger,
+            duplicate.sources.len()
+        );
+    }
     for warning in config.unreachable_triggers() {
         println!(
             "WARNING: trigger '{}' in {} is unreachable in immediate mode because '{}' in {} expands first",
@@ -318,6 +332,8 @@ fn write_new(path: &std::path::Path, contents: &str) -> anyhow::Result<()> {
 #[derive(Debug, serde::Serialize)]
 struct ListEntry {
     trigger: String,
+    #[serde(skip_serializing_if = "is_false")]
+    regex: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     label: Option<String>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
@@ -328,6 +344,10 @@ struct ListEntry {
     editable: bool,
 }
 
+fn is_false(value: &bool) -> bool {
+    !*value
+}
+
 fn list_entries(config: &config::Config) -> Vec<ListEntry> {
     let generated_path = config::Config::generated_path();
     let mut rows = config
@@ -335,15 +355,20 @@ fn list_entries(config: &config::Config) -> Vec<ListEntry> {
         .iter()
         .flat_map(|item| {
             let generated = item.source == generated_path;
-            item.triggers.iter().map(move |trigger| ListEntry {
-                trigger: trigger.clone(),
-                label: item.label.clone(),
-                search_terms: item.search_terms.clone(),
-                replacement: item.replace.clone(),
-                source: item.source.display().to_string(),
-                generated,
-                editable: generated,
-            })
+            item.triggers
+                .iter()
+                .map(|trigger| (trigger.clone(), false))
+                .chain(item.regex.iter().map(|pattern| (pattern.clone(), true)))
+                .map(move |(trigger, regex)| ListEntry {
+                    trigger,
+                    regex,
+                    label: item.label.clone(),
+                    search_terms: item.search_terms.clone(),
+                    replacement: item.replace.clone(),
+                    source: item.source.display().to_string(),
+                    generated,
+                    editable: generated,
+                })
         })
         .collect::<Vec<_>>();
     rows.sort_by(|left, right| left.trigger.cmp(&right.trigger));
@@ -649,6 +674,7 @@ mod tests {
         let handwritten = generated.parent().unwrap().join("personal.yml");
         let make_match = |trigger: &str, source: std::path::PathBuf| config::Match {
             triggers: vec![trigger.to_string()],
+            regex: None,
             label: Some(format!("Label for {trigger}")),
             search_terms: vec!["example".into()],
             replace: format!("{trigger} replacement"),

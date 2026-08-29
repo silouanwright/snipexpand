@@ -1,4 +1,4 @@
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 
 use crate::config::{Match, TriggerMode, UppercaseStyle, VariableKind};
 
@@ -21,6 +21,9 @@ pub struct Expander {
 
 pub(crate) struct CompiledMatch {
     trigger: String,
+    regex: Option<regex::Regex>,
+    source: std::path::PathBuf,
+    ambiguous: bool,
     replace: String,
     vars: Vec<crate::config::Variable>,
     left_word: bool,
@@ -35,11 +38,31 @@ pub(crate) trait IntoCompiledMatches {
 
 impl IntoCompiledMatches for Match {
     fn append_compiled(self, output: &mut Vec<CompiledMatch>) {
-        for trigger in self.triggers {
+        for trigger in &self.triggers {
             output.push(CompiledMatch {
-                trigger,
+                trigger: trigger.clone(),
+                regex: None,
+                source: self.source.clone(),
+                ambiguous: false,
                 replace: self.replace.clone(),
                 vars: self.vars.clone(),
+                left_word: self.word || self.left_word,
+                right_word: self.word || self.right_word,
+                propagate_case: self.propagate_case,
+                uppercase_style: self.uppercase_style,
+            });
+        }
+        if let Some(pattern) = &self.regex {
+            output.push(CompiledMatch {
+                trigger: String::new(),
+                regex: Some(
+                    regex::Regex::new(&format!("(?:{pattern})$"))
+                        .expect("regex triggers were validated"),
+                ),
+                source: self.source,
+                ambiguous: false,
+                replace: self.replace,
+                vars: self.vars,
                 left_word: self.word || self.left_word,
                 right_word: self.word || self.right_word,
                 propagate_case: self.propagate_case,
@@ -53,6 +76,9 @@ impl IntoCompiledMatches for (String, String) {
     fn append_compiled(self, output: &mut Vec<CompiledMatch>) {
         output.push(CompiledMatch {
             trigger: self.0,
+            regex: None,
+            source: std::path::PathBuf::new(),
+            ambiguous: false,
             replace: self.1,
             vars: Vec::new(),
             left_word: false,
@@ -66,7 +92,7 @@ impl IntoCompiledMatches for (String, String) {
 impl Expander {
     #[cfg(test)]
     pub fn new<T: IntoCompiledMatches>(matches: Vec<T>, trigger_mode: TriggerMode) -> Self {
-        Self::new_configured(matches, trigger_mode, vec![' '], None)
+        Self::new_configured(matches, trigger_mode, vec![' '], None, 256)
     }
 
     pub fn new_configured<T: IntoCompiledMatches>(
@@ -74,13 +100,17 @@ impl Expander {
         trigger_mode: TriggerMode,
         terminators: Vec<char>,
         word_separators: Option<Vec<char>>,
+        regex_max_buffer: usize,
     ) -> Self {
         let matches = compile_matches(matches);
-        let max_trigger_len = matches
+        let mut max_trigger_len = matches
             .iter()
             .map(|item| item.trigger.chars().count())
             .max()
             .unwrap_or(0);
+        if matches.iter().any(|item| item.regex.is_some()) {
+            max_trigger_len = max_trigger_len.max(regex_max_buffer);
+        }
         Self {
             buffer: VecDeque::new(),
             max_trigger_len,
@@ -93,7 +123,7 @@ impl Expander {
 
     #[cfg(test)]
     pub fn update<T: IntoCompiledMatches>(&mut self, matches: Vec<T>, trigger_mode: TriggerMode) {
-        self.update_configured(matches, trigger_mode, vec![' '], None);
+        self.update_configured(matches, trigger_mode, vec![' '], None, 256);
     }
 
     pub fn update_configured<T: IntoCompiledMatches>(
@@ -102,6 +132,7 @@ impl Expander {
         trigger_mode: TriggerMode,
         terminators: Vec<char>,
         word_separators: Option<Vec<char>>,
+        regex_max_buffer: usize,
     ) {
         let matches = compile_matches(matches);
         self.max_trigger_len = matches
@@ -109,6 +140,9 @@ impl Expander {
             .map(|item| item.trigger.chars().count())
             .max()
             .unwrap_or(0);
+        if matches.iter().any(|item| item.regex.is_some()) {
+            self.max_trigger_len = self.max_trigger_len.max(regex_max_buffer);
+        }
         self.matches = matches;
         self.trigger_mode = trigger_mode;
         self.terminators = terminators;
@@ -158,16 +192,27 @@ impl Expander {
         let terminator_count = usize::from(terminator.is_some());
 
         for item in &self.matches {
+            if item.ambiguous {
+                continue;
+            }
             if terminator_count == 0 && item.right_word {
                 continue;
             }
-            if let Some(typed_trigger) = matching_suffix(&buf_str, item) {
-                if !left_boundary_matches(&buf_str, item, self.word_separators.as_deref()) {
+            if let Some((typed_trigger, captures)) = matching_suffix(&buf_str, item) {
+                if !left_boundary_matches(
+                    &buf_str,
+                    item,
+                    typed_trigger.chars().count(),
+                    self.word_separators.as_deref(),
+                ) {
                     continue;
                 }
-                let delete_count = item.trigger.chars().count() + terminator_count;
-                let rendered =
-                    apply_propagated_case(render(&self.matches, item), item, &typed_trigger);
+                let delete_count = typed_trigger.chars().count() + terminator_count;
+                let rendered = apply_propagated_case(
+                    render(&self.matches, item, &captures),
+                    item,
+                    &typed_trigger,
+                );
                 let (text, cursor_back) = prepare_replacement(&rendered);
                 self.buffer.clear();
                 return Some(Expansion {
@@ -188,20 +233,30 @@ impl Expander {
         let mut buf_str: String = self.buffer.iter().collect();
         buf_str.pop();
         for item in &self.matches {
-            if !item.right_word
-                || !left_boundary_matches(&buf_str, item, self.word_separators.as_deref())
-            {
+            if item.ambiguous {
                 continue;
             }
-            let Some(typed_trigger) = matching_suffix(&buf_str, item) else {
+            if !item.right_word {
+                continue;
+            }
+            let Some((typed_trigger, captures)) = matching_suffix(&buf_str, item) else {
                 continue;
             };
-            let rendered = apply_propagated_case(render(&self.matches, item), item, &typed_trigger);
+            if !left_boundary_matches(
+                &buf_str,
+                item,
+                typed_trigger.chars().count(),
+                self.word_separators.as_deref(),
+            ) {
+                continue;
+            }
+            let rendered =
+                apply_propagated_case(render(&self.matches, item, &captures), item, &typed_trigger);
             let replacement = format!("{}{}", rendered, separator);
             let (text, cursor_back) = prepare_replacement(&replacement);
             self.buffer.clear();
             return Some(Expansion {
-                delete_count: item.trigger.chars().count() + 1,
+                delete_count: typed_trigger.chars().count() + 1,
                 text,
                 cursor_back,
                 undo_text: format!("{}{}", typed_trigger, separator),
@@ -218,15 +273,28 @@ impl Expander {
         self.buffer.clear();
     }
 
-    pub fn expansion_for_trigger(&self, trigger: &str) -> Option<Expansion> {
-        let item = self.matches.iter().find(|item| item.trigger == trigger)?;
-        let (text, cursor_back) = prepare_replacement(&render(&self.matches, item));
+    pub fn expansion_for_trigger(&self, trigger: &str, source: Option<&str>) -> Option<Expansion> {
+        let item = self.matches.iter().find(|item| {
+            item.regex.is_none()
+                && item.trigger == trigger
+                && source.is_none_or(|source| item.source.to_string_lossy() == source)
+        })?;
+        let (text, cursor_back) =
+            prepare_replacement(&render(&self.matches, item, &HashMap::new()));
         Some(Expansion {
             delete_count: 0,
             text,
             cursor_back,
             undo_text: String::new(),
         })
+    }
+
+    pub fn trigger_is_ambiguous(&self, trigger: &str) -> bool {
+        self.matches
+            .iter()
+            .filter(|item| item.regex.is_none() && item.trigger == trigger)
+            .count()
+            > 1
     }
 }
 
@@ -235,6 +303,21 @@ fn compile_matches<T: IntoCompiledMatches>(matches: Vec<T>) -> Vec<CompiledMatch
     for item in matches {
         item.append_compiled(&mut compiled);
     }
+    let mut causes = HashMap::<String, usize>::new();
+    for item in &compiled {
+        let cause = item
+            .regex
+            .as_ref()
+            .map_or_else(|| item.trigger.clone(), |regex| regex.as_str().to_string());
+        *causes.entry(cause).or_default() += 1;
+    }
+    for item in &mut compiled {
+        let cause = item
+            .regex
+            .as_ref()
+            .map_or_else(|| item.trigger.clone(), |regex| regex.as_str().to_string());
+        item.ambiguous = causes[&cause] > 1;
+    }
     compiled.sort_by_key(|item| std::cmp::Reverse(item.trigger.chars().count()));
     compiled
 }
@@ -242,21 +325,35 @@ fn compile_matches<T: IntoCompiledMatches>(matches: Vec<T>) -> Vec<CompiledMatch
 fn left_boundary_matches(
     buffer: &str,
     item: &CompiledMatch,
+    matched_len: usize,
     word_separators: Option<&[char]>,
 ) -> bool {
     if !item.left_word {
         return true;
     }
-    buffer
-        .chars()
-        .rev()
-        .nth(item.trigger.chars().count())
-        .is_none_or(|value| {
-            word_separators.map_or_else(|| !is_word_char(value), |values| values.contains(&value))
-        })
+    buffer.chars().rev().nth(matched_len).is_none_or(|value| {
+        word_separators.map_or_else(|| !is_word_char(value), |values| values.contains(&value))
+    })
 }
 
-fn matching_suffix(buffer: &str, item: &CompiledMatch) -> Option<String> {
+fn matching_suffix(
+    buffer: &str,
+    item: &CompiledMatch,
+) -> Option<(String, HashMap<String, String>)> {
+    if let Some(regex) = &item.regex {
+        let captures = regex.captures(buffer)?;
+        let matched = captures.get(0)?.as_str().to_string();
+        let values = regex
+            .capture_names()
+            .flatten()
+            .filter_map(|name| {
+                captures
+                    .name(name)
+                    .map(|value| (name.to_string(), value.as_str().to_string()))
+            })
+            .collect();
+        return Some((matched, values));
+    }
     let trigger_len = item.trigger.chars().count();
     let suffix: String = buffer
         .chars()
@@ -269,7 +366,7 @@ fn matching_suffix(buffer: &str, item: &CompiledMatch) -> Option<String> {
     if suffix == item.trigger
         || (item.propagate_case && suffix.to_lowercase() == item.trigger.to_lowercase())
     {
-        Some(suffix)
+        Some((suffix, HashMap::new()))
     } else {
         None
     }
@@ -323,7 +420,11 @@ fn is_word_char(value: char) -> bool {
     value.is_alphanumeric() || value == '_'
 }
 
-fn render(matches: &[CompiledMatch], item: &CompiledMatch) -> String {
+fn render(
+    matches: &[CompiledMatch],
+    item: &CompiledMatch,
+    captures: &HashMap<String, String>,
+) -> String {
     let mut result = item.replace.clone();
     for variable in &item.vars {
         let value = match variable.kind {
@@ -339,10 +440,13 @@ fn render(matches: &[CompiledMatch], item: &CompiledMatch) -> String {
             VariableKind::Match => matches
                 .iter()
                 .find(|candidate| candidate.trigger == variable.params.trigger)
-                .map(|candidate| render(matches, candidate))
+                .map(|candidate| render(matches, candidate, &HashMap::new()))
                 .expect("nested match references were validated"),
         };
         result = result.replace(&format!("{{{{{}}}}}", variable.name), &value);
+    }
+    for (name, value) in captures {
+        result = result.replace(&format!("{{{{{name}}}}}"), value);
     }
     result
 }
@@ -366,6 +470,7 @@ mod tests {
     fn structured_match(trigger: &str, replace: &str) -> Match {
         Match {
             triggers: vec![trigger.to_string()],
+            regex: None,
             label: None,
             search_terms: Vec::new(),
             replace: replace.to_string(),
@@ -405,7 +510,7 @@ mod tests {
             TriggerMode::Immediate,
         );
         assert_eq!(
-            e.expansion_for_trigger(";bold"),
+            e.expansion_for_trigger(";bold", None),
             Some(Expansion {
                 delete_count: 0,
                 text: "****".to_string(),
@@ -661,6 +766,7 @@ mod tests {
             TriggerMode::Space,
             vec!['\n'],
             None,
+            256,
         );
         for c in ";mail".chars() {
             assert!(e.push_char(c).is_none());
@@ -681,6 +787,7 @@ mod tests {
             TriggerMode::Immediate,
             vec![' '],
             Some(vec!['.']),
+            256,
         );
         for character in "-cat".chars() {
             assert!(expander.push_char(character).is_none());
@@ -833,6 +940,45 @@ mod tests {
             expansion = expander.push_char(character);
         }
         assert_eq!(expansion.unwrap().text, "Hello, Silouan!");
+    }
+
+    #[test]
+    fn regex_triggers_render_named_captures() {
+        let mut item = structured_match("unused", "Issue #{{number}}");
+        item.triggers.clear();
+        item.regex = Some(r"issue-(?P<number>\d{3})".into());
+        let mut expander =
+            Expander::new_configured(vec![item], TriggerMode::Immediate, vec![' '], None, 64);
+        let mut expansion = None;
+        for character in "please issue-123".chars() {
+            expansion = expander.push_char(character);
+        }
+        let expansion = expansion.unwrap();
+        assert_eq!(expansion.delete_count, 9);
+        assert_eq!(expansion.text, "Issue #123");
+        assert_eq!(expansion.undo_text, "issue-123");
+    }
+
+    #[test]
+    fn duplicate_triggers_require_source_selection() {
+        let mut first = structured_match(";same", "first");
+        first.source = PathBuf::from("first.yml");
+        let mut second = structured_match(";same", "second");
+        second.source = PathBuf::from("second.yml");
+        let mut expander = Expander::new(vec![first, second], TriggerMode::Immediate);
+        let mut automatic = None;
+        for character in ";same".chars() {
+            automatic = expander.push_char(character);
+        }
+        assert!(automatic.is_none());
+        assert!(expander.trigger_is_ambiguous(";same"));
+        assert_eq!(
+            expander
+                .expansion_for_trigger(";same", Some("second.yml"))
+                .unwrap()
+                .text,
+            "second"
+        );
     }
 
     #[test]
