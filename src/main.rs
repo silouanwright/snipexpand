@@ -302,11 +302,17 @@ fn ensure_config() -> anyhow::Result<()> {
         )?;
     }
 
-    std::fs::write(
-        dir.join("SKILL.md"),
-        include_str!("../skills/snipexpand-shortcuts.md"),
-    )?;
+    let skill_path = dir.join("SKILL.md");
+    let skill = include_str!("../skills/snipexpand-shortcuts.md");
+    write_if_changed(&skill_path, skill)?;
 
+    Ok(())
+}
+
+fn write_if_changed(path: &std::path::Path, contents: &str) -> anyhow::Result<()> {
+    if std::fs::read_to_string(path).ok().as_deref() != Some(contents) {
+        std::fs::write(path, contents)?;
+    }
     Ok(())
 }
 
@@ -650,6 +656,19 @@ mod tests {
         assert!(definition.contains("ExecStart=\"/tmp/Snip Expand/%%i/bin\""));
         assert!(definition.contains("Restart=on-failure"));
         assert!(definition.contains("WantedBy=graphical-session.target"));
+    }
+
+    #[test]
+    fn unchanged_generated_files_are_not_rewritten() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let path = dir.path().join("skill.md");
+        write_if_changed(&path, "same").unwrap();
+        let modified = std::fs::metadata(&path).unwrap().modified().unwrap();
+        write_if_changed(&path, "same").unwrap();
+        assert_eq!(
+            std::fs::metadata(&path).unwrap().modified().unwrap(),
+            modified
+        );
     }
 
     #[test]
