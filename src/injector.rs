@@ -171,6 +171,13 @@ pub struct Injector {
     backend: &'static str,
 }
 
+#[derive(Debug, PartialEq, Eq)]
+enum CursorMove {
+    None,
+    Left(usize),
+    Line { up: usize, column: usize },
+}
+
 impl Injector {
     pub fn spawn(
         backend: InjectionBackend,
@@ -277,15 +284,25 @@ impl Injector {
     }
 
     pub fn cursor_left(&self, count: usize) {
+        self.press_key(105, count); // KEY_LEFT
+    }
+
+    pub fn position_cursor(&self, text: &str, chars_after: usize) {
+        match cursor_move(text, chars_after) {
+            CursorMove::None => {}
+            CursorMove::Left(count) => self.cursor_left(count),
+            CursorMove::Line { up, column } => {
+                self.press_key(103, up); // KEY_UP
+                self.press_key(102, 1); // KEY_HOME
+                self.press_key(106, column); // KEY_RIGHT
+            }
+        }
+    }
+
+    fn press_key(&self, code: u16, count: usize) {
         for _ in 0..count {
-            let _ = self.tx.send(InjectionCmd::Key {
-                code: 105,
-                value: 1,
-            }); // KEY_LEFT press
-            let _ = self.tx.send(InjectionCmd::Key {
-                code: 105,
-                value: 0,
-            }); // KEY_LEFT release
+            let _ = self.tx.send(InjectionCmd::Key { code, value: 1 });
+            let _ = self.tx.send(InjectionCmd::Key { code, value: 0 });
         }
     }
 
@@ -395,6 +412,26 @@ impl Injector {
             .context("uinput injection thread stopped")?;
         rx.recv_timeout(std::time::Duration::from_secs(2))
             .context("timed out waiting for injected keys")
+    }
+}
+
+fn cursor_move(text: &str, chars_after: usize) -> CursorMove {
+    if chars_after == 0 {
+        return CursorMove::None;
+    }
+    let marker = text.chars().count().saturating_sub(chars_after);
+    let before = text.chars().take(marker).collect::<String>();
+    let after = text.chars().skip(marker).collect::<String>();
+    let up = after.chars().filter(|character| *character == '\n').count();
+    if up == 0 {
+        CursorMove::Left(chars_after)
+    } else {
+        CursorMove::Line {
+            up,
+            column: before
+                .rsplit_once('\n')
+                .map_or_else(|| before.chars().count(), |(_, line)| line.chars().count()),
+        }
     }
 }
 
@@ -1034,5 +1071,18 @@ mod tests {
             [(0, 30), (0, 48)]
         );
         assert!(resolve_text_codes(&codes, "ab🦀").is_err());
+    }
+
+    #[test]
+    fn multiline_cursor_moves_by_line_and_column() {
+        assert_eq!(
+            cursor_move("<details>\n<summary></summary>\n\n</details>", 11),
+            CursorMove::Line { up: 1, column: 0 }
+        );
+        assert_eq!(
+            cursor_move("foo\nbarbaz\nqux", 7),
+            CursorMove::Line { up: 1, column: 3 }
+        );
+        assert_eq!(cursor_move("****", 2), CursorMove::Left(2));
     }
 }

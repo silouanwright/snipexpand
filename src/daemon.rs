@@ -460,7 +460,7 @@ fn inject_expansion(
     }
     injector.backspace(expansion.delete_count);
     type_with_fallback(injector, &expansion.text);
-    injector.cursor_left(expansion.cursor_back);
+    injector.position_cursor(&expansion.text, expansion.cursor_back);
     if let Err(error) = injector.flush() {
         tracing::error!("Could not finish expansion injection: {}", error);
     }
