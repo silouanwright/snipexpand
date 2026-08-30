@@ -1,7 +1,7 @@
 ---
 name: snipexpand-shortcuts
 description: Add, remove, inspect, validate, and organize SnipExpand text-expansion shortcuts.
-version: 2.0.0
+version: 2.1.0
 ---
 
 # SnipExpand shortcuts
@@ -40,6 +40,8 @@ match files.
    invalid configuration in place.
 8. Do not add shell commands, scripts, forms, imports, or other
    unsupported Espanso fields. SnipExpand rejects unknown fields.
+9. Treat installed packs as read-only. Enable, disable, update, or remove them
+   with `snipexpand pack`; do not edit their mirrored match files.
 
 ## Simple CLI operations
 
@@ -70,6 +72,30 @@ snipexpand remove ';mail'
 
 `remove` does not delete triggers defined in handwritten files. Use the source
 path shown by `snipexpand list` to find and edit those entries.
+
+## Snippet packs
+
+Inspect a native SnipExpand pack or compatible Espanso pack before installing:
+
+```bash
+snipexpand pack inspect GIT_URL
+snipexpand pack install GIT_URL
+```
+
+Use `--path DIR` for a pack inside a larger repository and `--ref REF` to select
+a tag, branch, or commit. Manage installed packs with:
+
+```bash
+snipexpand pack list
+snipexpand pack update PACK
+snipexpand pack disable PACK
+snipexpand pack enable PACK
+snipexpand pack remove PACK
+```
+
+Pack installation is strict. Never work around a validation error by copying a
+partially compatible pack into the user's match directory. Explain the exact
+unsupported field instead.
 
 ## Advanced YAML matches
 
@@ -147,8 +173,9 @@ terminators: [space]      # space, enter, and/or tab
   the trigger.
 - `word` requires both left and right word boundaries.
 - `left_word` and `right_word` require only their corresponding boundary.
-- Duplicate triggers are invalid. Prefix-related triggers are supported and
-  resolved deterministically; do not claim they are forbidden.
+- Duplicate triggers are allowed for picker selection but require an app
+  profile to leave one active match for typed expansion. Prefix-related
+  triggers are supported and resolved deterministically.
 
 ## Application exclusions
 

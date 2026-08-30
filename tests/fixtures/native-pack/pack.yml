@@ -1,0 +1,7 @@
+name: useful-symbols
+title: Useful Symbols
+version: 0.1.0
+description: Symbols used by the pack lifecycle test
+author: SnipExpand
+license: GPL-3.0-or-later
+tags: [symbols, test]

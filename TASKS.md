@@ -57,10 +57,6 @@ future feature releases.
   - Preserve the current exclusion syntax as the simple path.
   - Use `snipexpand detect` to expose the title, class, and executable values
     needed to write profile filters.
-- [ ] Add an Espanso migration command.
-  - Import the supported subset without rewriting the original configuration.
-  - Report every skipped or incompatible field with its file and match.
-  - Make the result pass `snipexpand check` before writing it.
 - [x] Add regex triggers with capture variables.
   - Bound the input buffer and regex execution so matching stays predictable.
   - Define deletion, boundaries, case propagation, and overlapping matches
@@ -80,6 +76,18 @@ future feature releases.
 - [ ] Add named snippet groups and quick enable or disable controls.
   - Support global and application-scoped groups.
   - Expose group state through the CLI and status JSON.
+- [x] Add Git-published snippet packs.
+  - Treat each installed pack as a read-only, independently enableable group.
+  - Auto-detect Espanso `_manifest.yml` plus `package.yml` repositories and
+    install them directly when every used field is supported by SnipExpand.
+  - Reject incompatible Espanso packs with a complete field-level report;
+    never silently omit snippets, variables, scripts, forms, or settings.
+  - Accept public or private Git URLs, an optional repository subdirectory,
+    and an optional tag or commit.
+  - Provide install, inspect, list, update, and remove commands.
+  - Validate every file and report trigger conflicts before enabling a pack.
+  - Keep updates explicit and record the installed commit for reproducibility.
+  - Let authors use ordinary repositories; do not require a central registry.
 - [ ] Add an optional long-text injection strategy.
   - Benchmark persistent typing before choosing a clipboard or compositor-native
     backend.
@@ -108,10 +116,6 @@ future feature releases.
   - Let Tab advance through declared positions after expansion.
   - Define cancellation behavior for mouse input, focus changes, and manual
     cursor movement.
-- [ ] Add Git-based snippet sharing.
-  - Start with import and export of ordinary directories.
-  - Pin revisions and validate all imported YAML.
-  - Do not build a hosted package registry until this proves insufficient.
 - [x] Ship an Omarchy companion plugin.
   - Search, insert, add, edit, remove, diagnose, and restart snippets and the
     service while keeping the daemon independent of the UI.
@@ -120,6 +124,15 @@ future feature releases.
 
 ## P3: Broader platform work
 
+- [ ] Add an Espanso migration command only after the intended compatibility
+  surface is complete.
+  - This concerns importing a user's personal Espanso configuration. Compatible
+    published Espanso packs may be installed earlier through the pack system.
+  - Importing earlier would lock migration behavior to an unfinished feature
+    target and create repeated migration churn.
+  - Import the supported subset without rewriting the original configuration.
+  - Report every skipped or incompatible field with its file and match.
+  - Make the result pass `snipexpand check` before writing it.
 - [ ] Add tested support for more Wayland compositors, starting with those that
   expose reliable active-window and virtual-keyboard protocols.
 - [ ] Investigate macOS and Windows backends without weakening the Linux and

@@ -43,10 +43,13 @@ SnipExpand preserves four small boundaries inside one crate:
 
 | Capability | Decision pressure |
 | --- | --- |
-| Espanso migration | Easier onboarding, but unsupported fields must be reported without rewriting the source configuration |
 | Named snippet groups | Useful organization and quick control once real configurations become difficult to manage |
+| Git-published snippet packs | Build on named groups with read-only, pinned, validated packs from ordinary repositories |
 | Clipboard backend for long text | Faster long replacements, but clipboard preservation and password-manager behavior need careful design |
-| Package import/export | Start with ordinary directories or Git before building a registry |
+
+Espanso migration is intentionally deferred until SnipExpand's desired
+compatibility surface is complete. Building it earlier would target a moving
+format and create avoidable migration churn.
 
 See the [prioritized backlog](../TASKS.md) for the current ordering and detailed
 acceptance criteria.

@@ -913,7 +913,9 @@ fn save_generated(path: &Path, file: &GeneratedFile) -> Result<()> {
     Ok(())
 }
 
-fn parse_yaml<T: DeserializeOwned>(content: &str) -> std::result::Result<T, serde_saphyr::Error> {
+pub(crate) fn parse_yaml<T: DeserializeOwned>(
+    content: &str,
+) -> std::result::Result<T, serde_saphyr::Error> {
     let options = serde_saphyr::options! {
         budget: serde_saphyr::budget! {
             max_aliases: 0,

@@ -5,6 +5,7 @@ mod expander;
 mod injector;
 mod ipc;
 mod keyboard;
+mod packs;
 
 use clap::{Parser, Subcommand};
 
@@ -76,6 +77,51 @@ enum Cmd {
     Install,
     /// Stop and remove the user service while preserving configuration
     Uninstall,
+    /// Install and manage Git-published snippet packs
+    Pack {
+        #[command(subcommand)]
+        command: PackCmd,
+    },
+}
+
+#[derive(Subcommand)]
+enum PackCmd {
+    /// Inspect and validate a pack without installing it
+    Inspect {
+        source: String,
+        #[arg(long)]
+        path: Option<String>,
+        #[arg(long = "ref")]
+        git_ref: Option<String>,
+    },
+    /// Install a pack from a Git repository
+    Install {
+        source: String,
+        #[arg(long)]
+        path: Option<String>,
+        #[arg(long = "ref")]
+        git_ref: Option<String>,
+        /// Install without enabling its snippets
+        #[arg(long)]
+        disabled: bool,
+    },
+    /// List installed packs
+    List {
+        #[arg(long)]
+        json: bool,
+    },
+    /// Update one installed pack, or every pack with --all
+    Update {
+        name: Option<String>,
+        #[arg(long, conflicts_with = "name")]
+        all: bool,
+    },
+    /// Enable an installed pack
+    Enable { name: String },
+    /// Disable an installed pack
+    Disable { name: String },
+    /// Remove an installed pack
+    Remove { name: String },
 }
 
 fn main() -> anyhow::Result<()> {
@@ -231,6 +277,29 @@ fn handle_cmd(cmd: Cmd) -> anyhow::Result<()> {
         Cmd::Uninstall => {
             uninstall_service()?;
         }
+        Cmd::Pack { command } => match command {
+            PackCmd::Inspect {
+                source,
+                path,
+                git_ref,
+            } => packs::inspect(&source, path.as_deref(), git_ref.as_deref())?,
+            PackCmd::Install {
+                source,
+                path,
+                git_ref,
+                disabled,
+            } => packs::install(&source, path.as_deref(), git_ref.as_deref(), !disabled)?,
+            PackCmd::List { json } => packs::list(json)?,
+            PackCmd::Update { name, all } => {
+                if !all && name.is_none() {
+                    anyhow::bail!("provide a pack name or --all");
+                }
+                packs::update(name.as_deref())?;
+            }
+            PackCmd::Enable { name } => packs::set_enabled(&name, true)?,
+            PackCmd::Disable { name } => packs::set_enabled(&name, false)?,
+            PackCmd::Remove { name } => packs::remove(&name)?,
+        },
     }
     Ok(())
 }

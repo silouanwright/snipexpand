@@ -28,6 +28,8 @@ Fast, config-based text expansion for Linux and Wayland. **First-class support f
 - Application exclusions and per-application profiles
 - Pause and resume controls through the CLI, IPC, and Omarchy plugin
 - Deliberate duplicate-trigger selection by source
+- Git-published snippet packs with pinned revisions and explicit updates
+- Direct installation of strictly compatible Espanso packs
 - Persistent Wayland injection with a `uinput` fallback
 - Strict validation and diagnostics
 
@@ -200,6 +202,33 @@ app_profiles:
 Run `snipexpand detect` while an application is focused to find the title,
 class, and executable values needed for an exclusion or profile.
 
+## Snippet packs
+
+Install a native SnipExpand pack or a compatible Espanso pack directly from a
+Git repository:
+
+```bash
+snipexpand pack inspect https://github.com/example/useful-symbols
+snipexpand pack install https://github.com/example/useful-symbols
+```
+
+Use `--path DIR` when a repository contains several packs and `--ref REF` to
+select a tag, branch, or commit. SnipExpand records the exact resolved commit.
+Installed packs are read-only, independently enableable collections. Updates
+are always explicit:
+
+```bash
+snipexpand pack list
+snipexpand pack disable useful-symbols
+snipexpand pack enable useful-symbols
+snipexpand pack update useful-symbols
+snipexpand pack remove useful-symbols
+```
+
+SnipExpand validates every pack before enabling it. Espanso packs using
+unsupported fields, scripts, forms, or variables are rejected rather than
+partially installed.
+
 ## Commands
 
 ```text
@@ -223,6 +252,13 @@ status [--json]                  Show daemon and configuration status
 doctor                           Diagnose setup and runtime requirements
 install                          Install and start the user service
 uninstall                        Remove the service; preserve configuration
+pack inspect SOURCE              Validate a Git-published pack
+pack install SOURCE              Install and enable a pack
+pack list                        List installed packs
+pack update NAME                 Update a pack explicitly
+pack enable NAME                 Enable an installed pack
+pack disable NAME                Disable an installed pack
+pack remove NAME                 Remove an installed pack
 ```
 
 Duplicate triggers may coexist for picker use. Automatic typing expands only
@@ -261,6 +297,7 @@ configuration surface.
 - [Prioritized tasks](TASKS.md)
 - [Espanso compatibility](docs/compatibility.md)
 - [Espanso-informed design notes](docs/espanso-roadmap.md)
+- [Publishing and managing snippet packs](docs/packs.md)
 
 ## Development
 

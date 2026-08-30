@@ -1,0 +1,4 @@
+matches:
+  - trigger: ";fixture-arrow"
+    label: Fixture arrow
+    replace: "→"
