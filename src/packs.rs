@@ -4,6 +4,8 @@ use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::path::{Component, Path, PathBuf};
 use std::process::Command;
 
+const ESPANSO_HUB_URL: &str = "https://github.com/espanso/hub";
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Manifest {
@@ -52,10 +54,19 @@ struct InspectedPack {
     match_count: usize,
 }
 
+#[derive(Debug, Deserialize)]
+struct MatchFileProbe {
+    #[serde(default)]
+    matches: Option<serde::de::IgnoredAny>,
+    #[serde(default)]
+    global_vars: Option<serde::de::IgnoredAny>,
+}
+
 pub fn inspect(source: &str, subdir: Option<&str>, git_ref: Option<&str>) -> Result<()> {
     let checkout = tempfile::tempdir().context("create temporary pack checkout")?;
     clone_repository(source, git_ref, checkout.path())?;
-    let pack = inspect_checkout(checkout.path(), subdir)?;
+    let resolved_subdir = resolve_subdir(source, subdir, checkout.path())?;
+    let pack = inspect_checkout(checkout.path(), resolved_subdir.as_deref())?;
     print_inspection(&pack, &git_commit(checkout.path())?);
     Ok(())
 }
@@ -75,7 +86,8 @@ pub fn install(
         .context("create pack staging directory")?;
     let repo = staging.path().join("repo");
     clone_repository(source, git_ref, &repo)?;
-    let inspected = inspect_checkout(&repo, subdir)?;
+    let resolved_subdir = resolve_subdir(source, subdir, &repo)?;
+    let inspected = inspect_checkout(&repo, resolved_subdir.as_deref())?;
     validate_name(&inspected.manifest.name)?;
     let destination = root.join(&inspected.manifest.name);
     if destination.exists() {
@@ -92,7 +104,7 @@ pub fn install(
         description: inspected.manifest.description.clone(),
         author: inspected.manifest.author.clone(),
         source: source.to_string(),
-        subdir: subdir.map(str::to_owned),
+        subdir: resolved_subdir,
         git_ref: git_ref.map(str::to_owned),
         commit: git_commit(&repo)?,
         format: inspected.format,
@@ -213,7 +225,13 @@ fn update_one(current: &InstalledPack) -> Result<()> {
         .context("create pack update staging directory")?;
     let repo = staging.path().join("repo");
     clone_repository(&current.source, current.git_ref.as_deref(), &repo)?;
-    let inspected = inspect_checkout(&repo, current.subdir.as_deref())?;
+    let requested_subdir = if current.source.starts_with("espanso:") {
+        None
+    } else {
+        current.subdir.as_deref()
+    };
+    let resolved_subdir = resolve_subdir(&current.source, requested_subdir, &repo)?;
+    let inspected = inspect_checkout(&repo, resolved_subdir.as_deref())?;
     if inspected.manifest.name != current.name {
         bail!(
             "updated pack changed its name from '{}' to '{}'",
@@ -228,6 +246,7 @@ fn update_one(current: &InstalledPack) -> Result<()> {
     updated.author = inspected.manifest.author;
     updated.commit = git_commit(&repo)?;
     updated.format = inspected.format;
+    updated.subdir = resolved_subdir;
     if updated.commit == current.commit {
         println!("{} is already up to date", current.name);
         return Ok(());
@@ -370,12 +389,42 @@ fn stage_matches(root: &Path, format: Format, destination: &Path) -> Result<()> 
             copy_yaml_tree(&source, destination)?;
         }
         Format::Espanso => {
-            let source = root.join("package.yml");
-            std::fs::copy(&source, destination.join("package.yml"))
-                .with_context(|| format!("copy {}", source.display()))?;
+            copy_espanso_yaml(root, destination)?;
         }
     }
     Ok(())
+}
+
+fn copy_espanso_yaml(source: &Path, destination: &Path) -> Result<()> {
+    for entry in std::fs::read_dir(source).with_context(|| format!("read {}", source.display()))? {
+        let entry = entry?;
+        let kind = entry.file_type()?;
+        if kind.is_symlink() {
+            bail!(
+                "pack contains unsupported symlink: {}",
+                entry.path().display()
+            );
+        }
+        let target = destination.join(entry.file_name());
+        if kind.is_dir() {
+            std::fs::create_dir_all(&target)?;
+            copy_espanso_yaml(&entry.path(), &target)?;
+        } else if entry.file_name() != "_manifest.yml"
+            && matches!(
+                entry.path().extension().and_then(|value| value.to_str()),
+                Some("yml" | "yaml")
+            )
+            && (entry.file_name() == "package.yml" || is_match_yaml(&entry.path())?)
+        {
+            std::fs::copy(entry.path(), &target)?;
+        }
+    }
+    Ok(())
+}
+
+fn is_match_yaml(path: &Path) -> Result<bool> {
+    let probe: MatchFileProbe = parse_yaml_file(path)?;
+    Ok(probe.matches.is_some() || probe.global_vars.is_some())
 }
 
 fn copy_yaml_tree(source: &Path, destination: &Path) -> Result<()> {
@@ -434,8 +483,14 @@ fn clone_repository(source: &str, git_ref: Option<&str>, destination: &Path) -> 
     }) {
         bail!("Git URLs must not contain credentials; use a credential helper or SSH");
     }
+    if let Some(name) = source.strip_prefix("espanso:") {
+        validate_name(name)?;
+    }
+    let git_source = source
+        .strip_prefix("espanso:")
+        .map_or(source, |_| ESPANSO_HUB_URL);
     run_git(
-        &["clone", "--quiet", "--no-checkout", source],
+        &["clone", "--quiet", "--no-checkout", git_source],
         None,
         Some(destination),
     )?;
@@ -445,6 +500,45 @@ fn clone_repository(source: &str, git_ref: Option<&str>, destination: &Path) -> 
         None,
     )?;
     Ok(())
+}
+
+fn resolve_subdir(source: &str, subdir: Option<&str>, repo: &Path) -> Result<Option<String>> {
+    let Some(name) = source.strip_prefix("espanso:") else {
+        validate_subdir(subdir)?;
+        return Ok(subdir.map(str::to_owned));
+    };
+    if subdir.is_some() {
+        bail!("--path cannot be used with an espanso: pack source");
+    }
+    validate_name(name)?;
+    let versions = repo.join("packages").join(name);
+    let version = latest_version_dir(&versions)?
+        .ok_or_else(|| anyhow::anyhow!("Espanso Hub pack '{name}' was not found"))?;
+    Ok(Some(format!("packages/{name}/{version}")))
+}
+
+fn latest_version_dir(root: &Path) -> Result<Option<String>> {
+    let entries = match std::fs::read_dir(root) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(error).with_context(|| format!("read {}", root.display())),
+    };
+    let mut versions = entries
+        .filter_map(|entry| entry.ok())
+        .filter(|entry| entry.file_type().is_ok_and(|kind| kind.is_dir()))
+        .filter_map(|entry| {
+            let name = entry.file_name().into_string().ok()?;
+            let mut parts = name.split('.');
+            let version = (
+                parts.next()?.parse::<u64>().ok()?,
+                parts.next()?.parse::<u64>().ok()?,
+                parts.next()?.parse::<u64>().ok()?,
+            );
+            parts.next().is_none().then_some((version, name))
+        })
+        .collect::<Vec<_>>();
+    versions.sort_by_key(|(version, _)| *version);
+    Ok(versions.pop().map(|(_, name)| name))
 }
 
 fn git_commit(repo: &Path) -> Result<String> {
@@ -651,6 +745,18 @@ mod tests {
     }
 
     #[test]
+    fn selects_latest_stable_hub_version() {
+        let root = tempfile::tempdir().unwrap();
+        for version in ["0.9.0", "1.2.0", "1.10.0", "2.0.0-beta"] {
+            std::fs::create_dir(root.path().join(version)).unwrap();
+        }
+        assert_eq!(
+            latest_version_dir(root.path()).unwrap().as_deref(),
+            Some("1.10.0")
+        );
+    }
+
+    #[test]
     fn inspects_native_and_espanso_packs_strictly() {
         let native = tempfile::tempdir().unwrap();
         std::fs::write(
@@ -679,10 +785,14 @@ mod tests {
             "matches:\n  - trigger: ':arrow'\n    replace: '→'\n",
         )
         .unwrap();
-        assert_eq!(
-            inspect_checkout(espanso.path(), None).unwrap().format,
-            Format::Espanso
-        );
+        std::fs::write(
+            espanso.path().join("extra.yml"),
+            "matches:\n  - trigger: ':dash'\n    replace: '—'\n",
+        )
+        .unwrap();
+        let inspected = inspect_checkout(espanso.path(), None).unwrap();
+        assert_eq!(inspected.format, Format::Espanso);
+        assert_eq!(inspected.match_count, 2);
 
         std::fs::write(
             espanso.path().join("package.yml"),

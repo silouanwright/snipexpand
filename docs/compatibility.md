@@ -69,7 +69,7 @@ listed matching and timing settings. The first matching profile wins.
 - Imports and anchors
 - Espanso's separate per-app config files; SnipExpand uses `app_profiles`
 - Per-match injection backends
-- Espanso Hub package metadata
+- Espanso base-configuration fields outside SnipExpand's documented settings
 
 These features may be added individually, but acceptance requires compatible
 behavior and tests. Unknown fields are errors.

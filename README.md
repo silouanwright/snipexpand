@@ -208,6 +208,9 @@ Install a native SnipExpand pack or a compatible Espanso pack directly from a
 Git repository:
 
 ```bash
+snipexpand pack inspect espanso:arrows
+snipexpand pack install espanso:arrows
+
 snipexpand pack inspect https://github.com/example/useful-symbols
 snipexpand pack install https://github.com/example/useful-symbols
 ```
@@ -228,6 +231,8 @@ snipexpand pack remove useful-symbols
 SnipExpand validates every pack before enabling it. Espanso packs using
 unsupported fields, scripts, forms, or variables are rejected rather than
 partially installed.
+The `espanso:NAME` shorthand selects the latest stable version of a compatible
+package from the official Espanso Hub.
 
 ## Commands
 

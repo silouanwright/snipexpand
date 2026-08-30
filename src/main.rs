@@ -88,6 +88,7 @@ enum Cmd {
 enum PackCmd {
     /// Inspect and validate a pack without installing it
     Inspect {
+        /// Git repository URL, or espanso:NAME for the official Hub
         source: String,
         #[arg(long)]
         path: Option<String>,
@@ -96,6 +97,7 @@ enum PackCmd {
     },
     /// Install a pack from a Git repository
     Install {
+        /// Git repository URL, or espanso:NAME for the official Hub
         source: String,
         #[arg(long)]
         path: Option<String>,

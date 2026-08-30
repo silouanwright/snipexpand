@@ -42,6 +42,32 @@ manifest and match field is supported. Scripts, forms, shell variables, imports,
 and other unsupported behavior produce a validation error. Nothing is silently
 omitted.
 
+Use the official Hub shorthand to inspect or install the latest stable version
+of a package:
+
+```bash
+snipexpand pack inspect espanso:arrows
+snipexpand pack install espanso:arrows
+```
+
+An explicit update checks the Hub again and moves to its newest stable version.
+The normal Git URL and `--path` form remains available for other repositories.
+
+### Tested Hub compatibility
+
+The following representative packages passed strict validation against Espanso
+Hub commit `bcacd1af1f009e3463ea7863a493e1b48f11587d` from 2026-08-25:
+
+- arrows, tableflip-package, quotes, supersubscript, spanish-accent,
+  portuguese-accents, and numeronyms
+- vim-digraphs, common-web-chars, and lean-symbols, including packages with
+  thousands of matches or multiple YAML files
+
+Packages using scripts, shell commands, clipboard variables, forms, or choices
+were rejected as intended. Two sampled packages were also rejected for missing
+nested trigger references. Validation proves that the package parses and uses
+supported behavior; it does not prove every expansion through every app.
+
 ## Commands
 
 ```bash

@@ -88,6 +88,8 @@ future feature releases.
   - Validate every file and report trigger conflicts before enabling a pack.
   - Keep updates explicit and record the installed commit for reproducibility.
   - Let authors use ordinary repositories; do not require a central registry.
+  - Install compatible official Hub packages with `espanso:NAME`.
+  - Manage installed packs from the Omarchy plugin.
 - [ ] Add an optional long-text injection strategy.
   - Benchmark persistent typing before choosing a clipboard or compositor-native
     backend.

@@ -52,6 +52,14 @@ rewriting the source. If it uses unsupported behavior, reject the pack with a
 complete field-level compatibility report. Never install a partially working
 pack.
 
+A live audit at Espanso Hub commit
+`bcacd1af1f009e3463ea7863a493e1b48f11587d` accepted 10 of 21 representative
+packages under strict validation. Static collections, multiple match files,
+and very large symbol packs worked. The remaining samples were correctly
+rejected for executable variables, clipboard, forms, choices, or unresolved
+nested triggers. This supports a small `espanso:NAME` shorthand without
+building a separate registry client.
+
 This is narrower than personal Espanso configuration migration. Pack support
 handles a versioned, self-contained repository; migration must reason about a
 user's whole configuration and remains deferred until the intended feature

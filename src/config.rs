@@ -350,6 +350,10 @@ pub struct DuplicateTrigger {
 #[derive(Debug, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct MatchFile {
+    #[serde(default, rename = "name")]
+    _package_name: Option<String>,
+    #[serde(default)]
+    parent: Option<String>,
     #[serde(default)]
     global_vars: Vec<Variable>,
     #[serde(default)]
@@ -451,6 +455,16 @@ impl Config {
             std::fs::read_to_string(path).with_context(|| format!("read {}", path.display()))?;
         let file: MatchFile =
             parse_yaml(&content).with_context(|| format!("parse {}", path.display()))?;
+        if file
+            .parent
+            .as_deref()
+            .is_some_and(|parent| parent != "default")
+        {
+            bail!(
+                "{}: only the Espanso package parent 'default' is supported",
+                path.display()
+            );
+        }
         for definition in file.matches {
             let triggers = definition.normalized_triggers(path)?;
             let vars = merge_variables(path, &file.global_vars, &definition.vars)?;

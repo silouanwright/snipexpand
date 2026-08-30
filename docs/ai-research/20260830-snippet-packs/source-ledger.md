@@ -22,7 +22,7 @@ Forbidden roots:
 | [Espanso external packages](https://espanso.org/docs/packages/external-packages/) | 2026-08-30 | 1 | Public and private Git repositories can serve packages without the Hub |
 | [Espanso package creation](https://espanso.org/docs/packages/creating-a-package/) | 2026-08-30 | 1 | Uses a manifest, ordinary match YAML, and README; supports independent Git repositories |
 | [Espanso package specification](https://espanso.org/docs/packages/package-specification/) | 2026-08-30 | 1 | Defines identity, SemVer, author, tags, homepage, license, and multiple match files |
-| [Espanso Hub repository](https://github.com/espanso/hub) | 2026-08-30 | 1 | Central catalog uses CI plus human review because packages may contain executable behavior |
+| [Espanso Hub repository](https://github.com/espanso/hub) | 2026-08-30 | 1 | Audited 21 representative packages at commit `bcacd1af1f009e3463ea7863a493e1b48f11587d`; 10 static packages passed strict validation and unsupported executable or unresolved behavior was rejected |
 | [TextExpander public groups](https://textexpander.com/learn/using/public-groups/contributing-to-snippets-in-public-groups) | 2026-08-30 | 1 | Public groups are subscribable, author-controlled collections with metadata, licensing, review, and updates |
 | [TextExpander group installation](https://textexpander.com/learn/using/snippet-groups/adding-snippet-groups-to-textexpander) | 2026-08-30 | 1 | Subscribed public groups remain read-only; users duplicate them to customize |
 | [Alfred snippets](https://www.alfredapp.com/help/features/snippets/) | 2026-08-30 | 1 | Collections provide grouping and portable export without a package registry |

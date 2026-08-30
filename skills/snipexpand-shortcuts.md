@@ -78,10 +78,13 @@ path shown by `snipexpand list` to find and edit those entries.
 Inspect a native SnipExpand pack or compatible Espanso pack before installing:
 
 ```bash
+snipexpand pack inspect espanso:arrows
+snipexpand pack install espanso:arrows
 snipexpand pack inspect GIT_URL
 snipexpand pack install GIT_URL
 ```
 
+`espanso:NAME` selects the latest stable version from the official Espanso Hub.
 Use `--path DIR` for a pack inside a larger repository and `--ref REF` to select
 a tag, branch, or commit. Manage installed packs with:
 
