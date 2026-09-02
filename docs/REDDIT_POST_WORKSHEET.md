@@ -156,14 +156,26 @@ Use these facts selectively. Do not place all of them in one post.
 - YAML match files reload when saved.
 - It supports multiple triggers, word boundaries, case propagation, formatted
   date variables, application exclusions, and simple immediate undo.
+- It supports regex triggers, reusable nested snippets, per-application
+  profiles, search metadata, and pause and resume controls.
+- It can install Git-published snippet packs and strictly compatible Espanso
+  packs at pinned revisions with explicit updates.
+- Its Omarchy plugin can search, insert, add, edit, and remove snippets, manage
+  packs, pause expansion, restart the service, and run diagnostics.
 - It uses persistent Wayland injection with a `uinput` fallback.
 - It provides validation, diagnostics, daemon status, and application
   detection commands.
 - It is free software under GPL-3.0-or-later.
 - The repository currently has automated tests plus a byte-exact real Hyprland
   compatibility suite.
-- SnipExpand does not execute snippets, read the clipboard, or contact online
-  services.
+- The daemon does not execute snippets, read the clipboard, or contact online
+  services. Pack-management commands contact the Git remotes users request.
+- The published v0.4.0 x86_64 artifact and checksum have been verified, as has
+  a clean isolated install of the v0.4.0 Omarchy plugin with Omarchy 4.0.0.
+- The byte-exact Foot and clean-Neovim baseline passes. The upcoming
+  Chromium-engine non-BMP compose fix passes its guarded Chromium test, but
+  public v0.4.0 does not contain that fix yet. Signal exposed the same issue and
+  still needs its guarded retest; the other graphical targets remain unverified.
 
 ## Claims that require careful wording
 
