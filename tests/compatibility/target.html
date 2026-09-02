@@ -1,0 +1,16 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>SnipExpand compatibility target</title>
+<style>
+  :root { color-scheme: dark; font: 20px monospace; }
+  body { margin: 2rem; background: #0b1712; color: #d7d5a8; }
+  textarea { box-sizing: border-box; width: 100%; height: 80vh; padding: 1rem;
+    border: 1px solid #5e9e82; border-radius: 12px; background: #102019;
+    color: inherit; font: inherit; }
+</style>
+<textarea autofocus spellcheck="false" aria-label="Compatibility test input"></textarea>
+<script>
+  const target = document.querySelector("textarea")
+  addEventListener("load", () => target.focus())
+  addEventListener("focus", () => target.focus())
+</script>

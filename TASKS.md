@@ -8,8 +8,21 @@ bottom unless user feedback provides a stronger signal.
 These tasks should come before adding major expansion features.
 
 - [ ] Build a repeatable application compatibility suite.
+  - Current state:
+    [2026-08-30 compatibility checkpoint](docs/checkpoint-compatibility-2026-08-30.md).
   - [x] Establish an isolated, byte-exact Neovim-in-Foot baseline using the
     real evdev and Wayland injection path.
+  - [x] Add reusable browser/Electron and Qt targets plus a byte-exact clipboard
+    verifier for applications that cannot save the target buffer directly.
+  - [ ] Finish application-aware non-BMP input validation. Chromium and Electron
+    use a paced, injector-owned compose sequence automatically, while terminal
+    applications retain direct modifier-free Wayland keymaps. Sequence,
+    modifier cleanup, and timing configuration have deterministic coverage;
+    guarded Chromium and Signal live retests remain.
+    - [x] Add an explicit input-method-v2 mode for direct UTF-8 commit when the
+      focused client supports text-input-v3 and no other input method owns the
+      seat. Keep it out of automatic routing because Omarchy's Fcitx5 already
+      owns that exclusive protocol role.
   - Cover Chromium, Firefox, Zed, terminals, Electron apps, GTK, and Qt.
   - Exercise ASCII, Unicode, multiline text, cursor placement, undo, rapid
     consecutive expansions, and configuration reloads.
@@ -74,6 +87,7 @@ future feature releases.
   - Let launchers select an exact duplicate with its source path through
     `snipexpand paste --source`.
 - [ ] Add named snippet groups and quick enable or disable controls.
+  - Provisional v0.5.0 candidate after the P0 application matrix is complete.
   - Support global and application-scoped groups.
   - Expose group state through the CLI and status JSON.
 - [x] Add Git-published snippet packs.
@@ -121,6 +135,8 @@ future feature releases.
 - [x] Ship an Omarchy companion plugin.
   - Search, insert, add, edit, remove, diagnose, and restart snippets and the
     service while keeping the daemon independent of the UI.
+  - Verify the released plugin through Omarchy 4.0.0's clean add, validate,
+    enable, and placement workflow under an isolated HOME.
 - [ ] Explore a cross-platform desktop companion only when another supported
   platform needs one.
 

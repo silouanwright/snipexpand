@@ -175,11 +175,21 @@ regex_max_buffer: 256
 # Prefer native Wayland injection and fall back to uinput.
 injection_backend: auto    # auto | wayland | uinput
 
+# Chromium and Electron need compose input above U+FFFF. Auto detects both.
+non_bmp_input: auto         # auto | keymap | compose | input_method
+
+# input_method commits UTF-8 directly through Wayland when text-input-v3 is
+# active. It is opt-in because only one input method can own a seat.
+
 # Tune these only if an application drops or reorders characters.
 injection_delay_ms: 1
 wayland_injection_delay_ms: 0
 uinput_injection_delay_ms: 1
 injection_settle_ms: 10
+
+# Chromium/Electron Unicode compose timing. This does not slow normal text.
+compose_delay_ms: 5
+compose_settle_ms: 10  # protects trigger deletion and compose transitions
 
 # Backspace immediately after a simple expansion to restore its trigger.
 undo_enabled: true         # true | false
@@ -197,6 +207,9 @@ app_profiles:
     include_match_files: [browser.yml]
     trigger_mode: space
     injection_delay_ms: 1
+    # non_bmp_input: compose # override for unusual application packaging
+    # compose_delay_ms: 5
+    # compose_settle_ms: 10
 ```
 
 Run `snipexpand detect` while an application is focused to find the title,
@@ -287,12 +300,18 @@ by `list --json`.
 - Application exclusions operate at the application level. Wayland does not
   expose a browser's focused field type, so SnipExpand cannot automatically
   identify password fields inside an allowed browser.
+- `non_bmp_input: input_method` requires Wayland input-method-v2, an active
+  text-input-v3 client that reports surrounding text, and exclusive ownership
+  of the seat's input-method slot. It falls back to the keyboard path when
+  unavailable. Omarchy runs Fcitx5 by default, so keep `auto` unless Fcitx5 is
+  intentionally absent.
 - SnipExpand reads global keyboard events, including sensitive input.
   Application exclusions stop expansion but do not stop the daemon from
   receiving those events. Install only binaries you trust.
 
-SnipExpand does not execute snippets, access the clipboard, or contact online
-services.
+The daemon does not execute snippet content, access the clipboard, or make
+network requests. Pack-management commands contact only the Git remotes you
+explicitly request.
 
 See the [compatibility matrix](docs/compatibility.md) for the complete supported
 configuration surface.

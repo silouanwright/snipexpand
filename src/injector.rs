@@ -11,7 +11,10 @@ use std::sync::{
 use std::thread;
 use wayland_client::{
     protocol::{wl_keyboard, wl_registry, wl_seat},
-    Connection, Dispatch, QueueHandle, WEnum,
+    Connection, Dispatch, EventQueue, QueueHandle, WEnum,
+};
+use wayland_protocols_misc::zwp_input_method_v2::client::{
+    zwp_input_method_manager_v2::ZwpInputMethodManagerV2, zwp_input_method_v2::ZwpInputMethodV2,
 };
 use wayland_protocols_misc::zwp_virtual_keyboard_v1::client::{
     zwp_virtual_keyboard_manager_v1::ZwpVirtualKeyboardManagerV1,
@@ -150,13 +153,27 @@ enum InjectionCmd {
     },
     Text {
         text: String,
+        compose_non_bmp: bool,
+        compose_timing: ComposeTiming,
         done: mpsc::Sender<std::result::Result<(), String>>,
+    },
+    ReplaceWithInputMethod {
+        original: String,
+        text: String,
+        done: mpsc::Sender<InputMethodCommitResult>,
     },
     RefreshTextKeymap {
         characters: String,
         done: mpsc::Sender<std::result::Result<(), String>>,
     },
     Flush(mpsc::Sender<()>),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum InputMethodCommitResult {
+    Committed,
+    NotCommitted(String),
+    Indeterminate(String),
 }
 
 // ---------------------------------------------------------------------------
@@ -168,7 +185,20 @@ pub struct Injector {
     keymap: KeymapLookup,
     delay_ms: Arc<AtomicU64>,
     settle_ms: AtomicU64,
+    compose_delay_ms: AtomicU64,
+    compose_settle_ms: AtomicU64,
     backend: &'static str,
+}
+
+pub(crate) struct InjectorOptions {
+    pub(crate) backend: InjectionBackend,
+    pub(crate) enable_input_method: bool,
+    pub(crate) delay_ms: u64,
+    pub(crate) wayland_delay_ms: Option<u64>,
+    pub(crate) uinput_delay_ms: Option<u64>,
+    pub(crate) settle_ms: u64,
+    pub(crate) compose_timing: ComposeTiming,
+    pub(crate) wayland_text_chars: String,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -179,14 +209,17 @@ enum CursorMove {
 }
 
 impl Injector {
-    pub fn spawn(
-        backend: InjectionBackend,
-        delay_ms: u64,
-        wayland_delay_ms: Option<u64>,
-        uinput_delay_ms: Option<u64>,
-        settle_ms: u64,
-        wayland_text_chars: String,
-    ) -> Result<Self> {
+    pub fn spawn(options: InjectorOptions) -> Result<Self> {
+        let InjectorOptions {
+            backend,
+            enable_input_method,
+            delay_ms,
+            wayland_delay_ms,
+            uinput_delay_ms,
+            settle_ms,
+            compose_timing,
+            wayland_text_chars,
+        } = options;
         let (keymap_tx, keymap_rx) = mpsc::channel::<KeymapData>();
         let (cmd_tx, cmd_rx) = mpsc::sync_channel::<InjectionCmd>(512);
 
@@ -222,6 +255,7 @@ impl Injector {
                     cmd_rx,
                     thread_delay_ms,
                     backend,
+                    enable_input_method,
                     &injection_keymap,
                     &wayland_text_chars,
                     ready_tx,
@@ -253,6 +287,8 @@ impl Injector {
             keymap: keymap.lookup,
             delay_ms: injection_delay_ms,
             settle_ms: AtomicU64::new(settle_ms),
+            compose_delay_ms: AtomicU64::new(compose_timing.delay_ms),
+            compose_settle_ms: AtomicU64::new(compose_timing.settle_ms),
             backend: active_backend,
         })
     }
@@ -273,10 +309,29 @@ impl Injector {
         self.settle_ms.store(settle_ms, Ordering::Relaxed);
     }
 
+    pub fn set_compose_timing(&self, delay_ms: u64, settle_ms: u64) {
+        self.compose_delay_ms.store(delay_ms, Ordering::Relaxed);
+        self.compose_settle_ms.store(settle_ms, Ordering::Relaxed);
+    }
+
     pub fn backspace(&self, count: usize) {
-        std::thread::sleep(std::time::Duration::from_millis(
+        self.backspace_after(count, self.settle_ms.load(Ordering::Relaxed));
+    }
+
+    pub fn backspace_for_compose(&self, count: usize) {
+        let settle_ms = compose_delete_settle_ms(
             self.settle_ms.load(Ordering::Relaxed),
-        ));
+            self.compose_settle_ms.load(Ordering::Relaxed),
+        );
+        self.backspace_after(count, settle_ms);
+    }
+
+    pub fn backspace_without_settle(&self, count: usize) {
+        self.backspace_after(count, 0);
+    }
+
+    fn backspace_after(&self, count: usize, settle_ms: u64) {
+        sleep_ms(settle_ms);
         for _ in 0..count {
             let _ = self.tx.send(InjectionCmd::Key { code: 14, value: 1 }); // press
             let _ = self.tx.send(InjectionCmd::Key { code: 14, value: 0 }); // release
@@ -350,18 +405,53 @@ impl Injector {
             .all(|ch| ch == '\n' || ch == '\t' || self.keymap.lookup(ch).is_some())
     }
 
-    pub fn type_wayland_text(&self, text: &str) -> Result<()> {
+    pub fn type_wayland_text(&self, text: &str, compose_non_bmp: bool) -> Result<()> {
         let (done, result) = mpsc::channel();
+        let compose_timing = ComposeTiming {
+            delay_ms: self.compose_delay_ms.load(Ordering::Relaxed),
+            settle_ms: self.compose_settle_ms.load(Ordering::Relaxed),
+        };
+        let timeout = wayland_text_timeout(text, compose_non_bmp, compose_timing);
         self.tx
             .send(InjectionCmd::Text {
                 text: text.to_string(),
+                compose_non_bmp,
+                compose_timing,
                 done,
             })
             .context("Wayland injection thread stopped")?;
         result
-            .recv_timeout(std::time::Duration::from_secs(2))
+            .recv_timeout(timeout)
             .context("timed out waiting for Wayland text injection")?
             .map_err(anyhow::Error::msg)
+    }
+
+    pub fn replace_with_input_method(&self, original: &str, text: &str) -> InputMethodCommitResult {
+        sleep_ms(compose_delete_settle_ms(
+            self.settle_ms.load(Ordering::Relaxed),
+            self.compose_settle_ms.load(Ordering::Relaxed),
+        ));
+        let (done, result) = mpsc::channel();
+        if self
+            .tx
+            .send(InjectionCmd::ReplaceWithInputMethod {
+                original: original.to_string(),
+                text: text.to_string(),
+                done,
+            })
+            .is_err()
+        {
+            return InputMethodCommitResult::NotCommitted(
+                "Wayland injection thread stopped".into(),
+            );
+        }
+        result
+            .recv_timeout(std::time::Duration::from_secs(2))
+            .unwrap_or_else(|error| {
+                InputMethodCommitResult::Indeterminate(format!(
+                    "timed out waiting for input-method-v2: {error}"
+                ))
+            })
     }
 
     pub fn refresh_wayland_text_keymap(&self, characters: String) -> Result<()> {
@@ -415,6 +505,10 @@ impl Injector {
     }
 }
 
+fn compose_delete_settle_ms(injection_settle_ms: u64, compose_settle_ms: u64) -> u64 {
+    injection_settle_ms.max(compose_settle_ms)
+}
+
 fn cursor_move(text: &str, chars_after: usize) -> CursorMove {
     if chars_after == 0 {
         return CursorMove::None;
@@ -442,7 +536,13 @@ fn cursor_move(text: &str, chars_after: usize) -> CursorMove {
 trait KeyboardTransport {
     fn send_key(&mut self, code: u16, value: i32) -> Result<()>;
 
-    fn send_text(&mut self, _text: &str, _delay_ms: u64) -> Result<()> {
+    fn send_text(
+        &mut self,
+        _text: &str,
+        _delay_ms: u64,
+        _compose_non_bmp: bool,
+        _compose_timing: ComposeTiming,
+    ) -> Result<()> {
         anyhow::bail!("text injection is unsupported by this backend")
     }
 
@@ -492,6 +592,90 @@ struct VirtualKeyboardState {
     manager: Option<ZwpVirtualKeyboardManagerV1>,
 }
 
+struct InputMethodState {
+    seat: Option<wl_seat::WlSeat>,
+    manager: Option<ZwpInputMethodManagerV2>,
+    input_method: InputMethodLifecycle,
+}
+
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+struct InputMethodLifecycle {
+    active: bool,
+    pending_active: Option<bool>,
+    surrounding: Option<SurroundingText>,
+    pending_surrounding: Option<SurroundingText>,
+    unavailable: bool,
+    serial: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct SurroundingText {
+    text: String,
+    cursor: usize,
+    anchor: usize,
+}
+
+impl InputMethodLifecycle {
+    fn activate(&mut self) {
+        self.pending_active = Some(true);
+        self.pending_surrounding = None;
+    }
+
+    fn deactivate(&mut self) {
+        self.pending_active = Some(false);
+    }
+
+    fn done(&mut self) {
+        if let Some(active) = self.pending_active.take() {
+            self.active = active;
+            if !active {
+                self.surrounding = None;
+            } else {
+                self.surrounding = self.pending_surrounding.take();
+            }
+        } else if let Some(surrounding) = self.pending_surrounding.take() {
+            self.surrounding = Some(surrounding);
+        }
+        self.serial = self.serial.wrapping_add(1);
+    }
+
+    fn set_surrounding(&mut self, text: String, cursor: u32, anchor: u32) {
+        self.pending_surrounding = Some(SurroundingText {
+            text,
+            cursor: cursor as usize,
+            anchor: anchor as usize,
+        });
+    }
+
+    fn make_unavailable(&mut self) {
+        self.active = false;
+        self.pending_active = None;
+        self.surrounding = None;
+        self.pending_surrounding = None;
+        self.unavailable = true;
+    }
+
+    fn can_commit(&self) -> bool {
+        self.active
+            && self.pending_active.is_none()
+            && self.pending_surrounding.is_none()
+            && !self.unavailable
+    }
+
+    fn can_replace(&self, original: &str) -> bool {
+        let Some(surrounding) = self.surrounding.as_ref() else {
+            return false;
+        };
+        if surrounding.cursor != surrounding.anchor || surrounding.cursor > surrounding.text.len() {
+            return false;
+        }
+        let start = surrounding.cursor.saturating_sub(original.len());
+        surrounding.cursor >= original.len()
+            && surrounding.text.as_bytes().get(start..surrounding.cursor)
+                == Some(original.as_bytes())
+    }
+}
+
 struct WaylandKeyboard {
     connection: Connection,
     queue_handle: QueueHandle<VirtualKeyboardState>,
@@ -500,10 +684,98 @@ struct WaylandKeyboard {
     keyboard: ZwpVirtualKeyboardV1,
     text_keyboards: Vec<ZwpVirtualKeyboardV1>,
     text_codes: HashMap<char, (usize, u16)>,
+    keymap_lookup: KeymapLookup,
     started: std::time::Instant,
     depressed_modifiers: u32,
     shift_mask: u32,
+    control_mask: u32,
     altgr_mask: u32,
+}
+
+struct InputMethodClient {
+    event_queue: EventQueue<InputMethodState>,
+    state: InputMethodState,
+    input_method: ZwpInputMethodV2,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct ComposeTiming {
+    pub(crate) delay_ms: u64,
+    pub(crate) settle_ms: u64,
+}
+
+fn wayland_text_timeout(
+    text: &str,
+    compose_non_bmp: bool,
+    timing: ComposeTiming,
+) -> std::time::Duration {
+    let compose_ms = text
+        .chars()
+        .filter(|character| compose_non_bmp && *character as u32 > 0xffff)
+        .fold(0u64, |total, character| {
+            let keys = format!("{:x}", character as u32).len() as u64 + 2;
+            total.saturating_add(
+                keys.saturating_mul(timing.delay_ms)
+                    .saturating_add(timing.settle_ms.saturating_mul(2)),
+            )
+        });
+    std::time::Duration::from_secs(2).saturating_add(std::time::Duration::from_millis(compose_ms))
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum WaylandTextStroke {
+    Keymap(usize, u16),
+    Unicode(char),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct ComposeKey {
+    code: u16,
+    control: bool,
+    shift: bool,
+    altgr: bool,
+}
+
+fn resolve_unicode_compose(keymap: &KeymapLookup, character: char) -> Result<Vec<ComposeKey>> {
+    let resolve = |value: char| -> Result<ComposeKey> {
+        let key = keymap
+            .lookup(value)
+            .with_context(|| format!("active keymap cannot type Unicode compose key {value:?}"))?;
+        let (shift, altgr) = match key.level {
+            0 => (false, false),
+            1 => (true, false),
+            2 => (false, true),
+            3 => (true, true),
+            level => anyhow::bail!(
+                "active keymap requires unsupported level {level} for Unicode compose key {value:?}"
+            ),
+        };
+        Ok(ComposeKey {
+            code: u16::try_from(key.evdev_code)
+                .context("Unicode compose keycode does not fit Linux input range")?,
+            control: false,
+            shift,
+            altgr,
+        })
+    };
+
+    let mut start = resolve('u')?;
+    start.control = true;
+    start.shift = true;
+    let mut sequence = vec![start];
+    sequence.extend(
+        format!("{:x}", character as u32)
+            .chars()
+            .map(resolve)
+            .collect::<Result<Vec<_>>>()?,
+    );
+    sequence.push(ComposeKey {
+        code: 28,
+        control: false,
+        shift: false,
+        altgr: false,
+    });
+    Ok(sequence)
 }
 
 impl WaylandKeyboard {
@@ -521,12 +793,17 @@ impl WaylandKeyboard {
         };
         display.get_registry(&qh, ());
         queue.roundtrip(&mut state)?;
-        let seat = state.seat.as_ref().context("compositor has no wl_seat")?;
+        let seat = state
+            .seat
+            .as_ref()
+            .context("compositor has no wl_seat")?
+            .clone();
         let manager = state
             .manager
             .as_ref()
-            .context("compositor has no virtual-keyboard-v1 support")?;
-        let keyboard = manager.create_virtual_keyboard(seat, &qh, ());
+            .context("compositor has no virtual-keyboard-v1 support")?
+            .clone();
+        let keyboard = manager.create_virtual_keyboard(&seat, &qh, ());
 
         let name = std::ffi::CString::new("snipexpand-keymap")?;
         let fd =
@@ -540,7 +817,7 @@ impl WaylandKeyboard {
         for (keyboard_index, (text_keymap, codes)) in
             build_text_keymaps(text_chars).into_iter().enumerate()
         {
-            let text_keyboard = manager.create_virtual_keyboard(seat, &qh, ());
+            let text_keyboard = manager.create_virtual_keyboard(&seat, &qh, ());
             upload_keymap(&text_keyboard, &text_keymap)?;
             text_keyboards.push(text_keyboard);
             text_codes.extend(
@@ -571,16 +848,172 @@ impl WaylandKeyboard {
         Ok(Self {
             connection,
             queue_handle: qh,
-            seat: seat.clone(),
-            manager: manager.clone(),
+            seat,
+            manager,
             keyboard,
             text_keyboards,
             text_codes,
+            keymap_lookup: KeymapLookup::build_from_xkb(&parsed),
             started: std::time::Instant::now(),
             depressed_modifiers: 0,
             shift_mask: modifier_mask(xkb::MOD_NAME_SHIFT),
+            control_mask: modifier_mask(xkb::MOD_NAME_CTRL),
             altgr_mask: modifier_mask(xkb::MOD_NAME_ISO_LEVEL3_SHIFT),
         })
+    }
+
+    fn set_modifiers(&mut self, modifiers: u32) {
+        self.depressed_modifiers = modifiers;
+        self.keyboard.modifiers(modifiers, 0, 0, 0);
+    }
+
+    fn send_keyboard_key(&self, code: u16, state: wl_keyboard::KeyState) {
+        let elapsed = self.started.elapsed().as_millis() as u32;
+        self.keyboard.key(elapsed, code as u32, state.into());
+    }
+
+    fn send_unicode_compose(
+        &mut self,
+        sequence: &[ComposeKey],
+        timing: ComposeTiming,
+    ) -> Result<()> {
+        if self.control_mask == 0 || self.shift_mask == 0 {
+            anyhow::bail!("active keymap has no Ctrl or Shift modifier for Unicode compose");
+        }
+        if self.altgr_mask == 0 && sequence.iter().any(|key| key.altgr) {
+            anyhow::bail!("active keymap has no AltGr modifier required by Unicode compose");
+        }
+        self.connection
+            .roundtrip()
+            .context("finish preceding Wayland input before Unicode compose")?;
+        sleep_ms(timing.settle_ms);
+
+        let result = (|| -> Result<()> {
+            for key in sequence {
+                let mut modifiers = 0;
+                if key.control {
+                    modifiers |= self.control_mask;
+                }
+                if key.shift {
+                    modifiers |= self.shift_mask;
+                }
+                if key.altgr {
+                    modifiers |= self.altgr_mask;
+                }
+                self.set_modifiers(modifiers);
+                self.send_keyboard_key(key.code, wl_keyboard::KeyState::Pressed);
+                self.send_keyboard_key(key.code, wl_keyboard::KeyState::Released);
+                self.set_modifiers(0);
+                self.connection
+                    .roundtrip()
+                    .context("dispatch Unicode compose key")?;
+                sleep_ms(timing.delay_ms);
+            }
+            sleep_ms(timing.settle_ms);
+            Ok(())
+        })();
+
+        // Clear synthetic modifiers even if dispatch failed mid-sequence. The
+        // cleanup roundtrip is intentionally attempted before returning the
+        // original error so Ctrl or Shift cannot leak into the next input.
+        self.set_modifiers(0);
+        let cleanup = self
+            .connection
+            .roundtrip()
+            .context("release Unicode compose modifiers")
+            .map(|_| ());
+        result?;
+        cleanup
+    }
+}
+
+impl InputMethodClient {
+    fn new() -> Result<Self> {
+        let connection = Connection::connect_to_env().context("connect to Wayland display")?;
+        let display = connection.display();
+        let mut event_queue = connection.new_event_queue::<InputMethodState>();
+        let qh = event_queue.handle();
+        let mut state = InputMethodState {
+            seat: None,
+            manager: None,
+            input_method: InputMethodLifecycle::default(),
+        };
+        display.get_registry(&qh, ());
+        event_queue.roundtrip(&mut state)?;
+        let seat = state.seat.as_ref().context("compositor has no wl_seat")?;
+        let manager = state
+            .manager
+            .as_ref()
+            .context("compositor has no input-method-v2 support")?;
+        let input_method = manager.get_input_method(seat, &qh, ());
+        event_queue
+            .roundtrip(&mut state)
+            .context("initialize input-method-v2")?;
+        if state.input_method.unavailable {
+            input_method.destroy();
+            anyhow::bail!("input-method-v2 is already owned by another input method");
+        }
+        Ok(Self {
+            event_queue,
+            state,
+            input_method,
+        })
+    }
+
+    fn commit_replacement(&mut self, original: &str, text: &str) -> InputMethodCommitResult {
+        let Ok(before_bytes) = u32::try_from(original.len()) else {
+            return InputMethodCommitResult::NotCommitted(
+                "matched trigger is too large for input-method-v2".into(),
+            );
+        };
+        if text.len() > 4_000 {
+            return InputMethodCommitResult::NotCommitted(
+                "replacement exceeds the input-method-v2 4000-byte limit".into(),
+            );
+        }
+        if let Err(error) = self.event_queue.roundtrip(&mut self.state) {
+            return InputMethodCommitResult::NotCommitted(format!(
+                "could not refresh input-method-v2 state: {error}"
+            ));
+        }
+        if self.state.input_method.unavailable {
+            return InputMethodCommitResult::NotCommitted(
+                "input-method-v2 became unavailable".into(),
+            );
+        }
+        if !self.state.input_method.can_commit() {
+            return InputMethodCommitResult::NotCommitted(
+                "the focused application has no active text-input-v3 context".into(),
+            );
+        }
+        if !self.state.input_method.can_replace(original) {
+            return InputMethodCommitResult::NotCommitted(
+                "the focused client did not confirm the matched trigger as surrounding text".into(),
+            );
+        }
+
+        self.input_method.delete_surrounding_text(before_bytes, 0);
+        self.input_method.commit_string(text.to_string());
+        self.input_method.commit(self.state.input_method.serial);
+        match self.event_queue.roundtrip(&mut self.state) {
+            Ok(_) if self.state.input_method.unavailable => InputMethodCommitResult::Indeterminate(
+                "input-method-v2 became unavailable while committing the replacement".into(),
+            ),
+            Ok(_) => InputMethodCommitResult::Committed,
+            Err(error) => InputMethodCommitResult::Indeterminate(format!(
+                "input-method-v2 dispatch failed after queuing the replacement: {error}"
+            )),
+        }
+    }
+
+    fn is_unavailable(&self) -> bool {
+        self.state.input_method.unavailable
+    }
+}
+
+impl Drop for InputMethodClient {
+    fn drop(&mut self) {
+        self.input_method.destroy();
     }
 }
 
@@ -593,11 +1026,10 @@ impl KeyboardTransport for WaylandKeyboard {
         };
         if modifier != 0 {
             if value == 0 {
-                self.depressed_modifiers &= !modifier;
+                self.set_modifiers(self.depressed_modifiers & !modifier);
             } else {
-                self.depressed_modifiers |= modifier;
+                self.set_modifiers(self.depressed_modifiers | modifier);
             }
-            self.keyboard.modifiers(self.depressed_modifiers, 0, 0, 0);
             return self.connection.flush().context("flush Wayland modifiers");
         }
         let state = if value == 0 {
@@ -610,23 +1042,49 @@ impl KeyboardTransport for WaylandKeyboard {
         self.connection.flush().context("flush Wayland key event")
     }
 
-    fn send_text(&mut self, text: &str, delay_ms: u64) -> Result<()> {
-        // Resolve the complete string before emitting anything. If one
-        // character is unavailable, the caller can safely fall back without
-        // duplicating the already emitted prefix.
-        let sequence = resolve_text_codes(&self.text_codes, text)?;
-        for (keyboard_index, code) in sequence {
-            let elapsed = self.started.elapsed().as_millis() as u32;
-            self.text_keyboards[keyboard_index].key(
-                elapsed,
-                code as u32,
-                wl_keyboard::KeyState::Pressed.into(),
-            );
-            self.text_keyboards[keyboard_index].key(
-                elapsed,
-                code as u32,
-                wl_keyboard::KeyState::Released.into(),
-            );
+    fn send_text(
+        &mut self,
+        text: &str,
+        delay_ms: u64,
+        compose_non_bmp: bool,
+        compose_timing: ComposeTiming,
+    ) -> Result<()> {
+        // Resolve the complete string before emitting anything. Runtime errors
+        // are not retried by the caller because the target may have accepted a
+        // prefix before reporting a later dispatch failure.
+        let sequence = resolve_wayland_text(&self.text_codes, text, compose_non_bmp)?;
+        let compose_sequences = sequence
+            .iter()
+            .filter_map(|stroke| match stroke {
+                WaylandTextStroke::Unicode(character) => {
+                    Some(resolve_unicode_compose(&self.keymap_lookup, *character))
+                }
+                WaylandTextStroke::Keymap(_, _) => None,
+            })
+            .collect::<Result<Vec<_>>>()?;
+        let mut compose_sequences = compose_sequences.iter();
+        for stroke in sequence {
+            match stroke {
+                WaylandTextStroke::Keymap(keyboard_index, code) => {
+                    let elapsed = self.started.elapsed().as_millis() as u32;
+                    self.text_keyboards[keyboard_index].key(
+                        elapsed,
+                        code as u32,
+                        wl_keyboard::KeyState::Pressed.into(),
+                    );
+                    self.text_keyboards[keyboard_index].key(
+                        elapsed,
+                        code as u32,
+                        wl_keyboard::KeyState::Released.into(),
+                    );
+                }
+                WaylandTextStroke::Unicode(_) => {
+                    let compose = compose_sequences
+                        .next()
+                        .context("missing pre-resolved Unicode compose sequence")?;
+                    self.send_unicode_compose(compose, compose_timing)?;
+                }
+            }
             if delay_ms > 0 {
                 std::thread::sleep(std::time::Duration::from_millis(delay_ms));
             }
@@ -675,16 +1133,28 @@ impl KeyboardTransport for WaylandKeyboard {
     }
 }
 
-fn resolve_text_codes(
+fn sleep_ms(delay_ms: u64) {
+    if delay_ms > 0 {
+        std::thread::sleep(std::time::Duration::from_millis(delay_ms));
+    }
+}
+
+fn resolve_wayland_text(
     text_codes: &HashMap<char, (usize, u16)>,
     text: &str,
-) -> Result<Vec<(usize, u16)>> {
+    compose_non_bmp: bool,
+) -> Result<Vec<WaylandTextStroke>> {
     text.chars()
         .map(|character| {
-            text_codes
-                .get(&character)
-                .copied()
-                .with_context(|| format!("character {character:?} is not in the text keymap"))
+            if compose_non_bmp && character as u32 > 0xffff {
+                Ok(WaylandTextStroke::Unicode(character))
+            } else {
+                text_codes
+                    .get(&character)
+                    .copied()
+                    .map(|(keyboard, code)| WaylandTextStroke::Keymap(keyboard, code))
+                    .with_context(|| format!("character {character:?} is not in the text keymap"))
+            }
         })
         .collect()
 }
@@ -809,10 +1279,86 @@ impl Dispatch<ZwpVirtualKeyboardV1, ()> for VirtualKeyboardState {
     }
 }
 
+impl Dispatch<wl_registry::WlRegistry, ()> for InputMethodState {
+    fn event(
+        state: &mut Self,
+        registry: &wl_registry::WlRegistry,
+        event: wl_registry::Event,
+        _: &(),
+        _: &Connection,
+        qh: &QueueHandle<Self>,
+    ) {
+        let wl_registry::Event::Global {
+            name,
+            interface,
+            version: _,
+        } = event
+        else {
+            return;
+        };
+        match interface.as_str() {
+            "wl_seat" => state.seat = Some(registry.bind(name, 1, qh, ())),
+            "zwp_input_method_manager_v2" => state.manager = Some(registry.bind(name, 1, qh, ())),
+            _ => {}
+        }
+    }
+}
+
+impl Dispatch<wl_seat::WlSeat, ()> for InputMethodState {
+    fn event(
+        _: &mut Self,
+        _: &wl_seat::WlSeat,
+        _: wl_seat::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+    }
+}
+
+impl Dispatch<ZwpInputMethodManagerV2, ()> for InputMethodState {
+    fn event(
+        _: &mut Self,
+        _: &ZwpInputMethodManagerV2,
+        _: <ZwpInputMethodManagerV2 as wayland_client::Proxy>::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+    }
+}
+
+impl Dispatch<ZwpInputMethodV2, ()> for InputMethodState {
+    fn event(
+        state: &mut Self,
+        _: &ZwpInputMethodV2,
+        event: <ZwpInputMethodV2 as wayland_client::Proxy>::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+        use wayland_protocols_misc::zwp_input_method_v2::client::zwp_input_method_v2::Event;
+
+        match event {
+            Event::Activate => state.input_method.activate(),
+            Event::Deactivate => state.input_method.deactivate(),
+            Event::SurroundingText {
+                text,
+                cursor,
+                anchor,
+            } => state.input_method.set_surrounding(text, cursor, anchor),
+            Event::Done => state.input_method.done(),
+            Event::Unavailable => state.input_method.make_unavailable(),
+            _ => {}
+        }
+    }
+}
+
 fn injection_thread(
     cmd_rx: mpsc::Receiver<InjectionCmd>,
     delay_ms: Arc<AtomicU64>,
     requested: InjectionBackend,
+    enable_input_method: bool,
     keymap: &str,
     wayland_text_chars: &str,
     ready: mpsc::SyncSender<std::result::Result<&'static str, String>>,
@@ -841,6 +1387,25 @@ fn injection_thread(
     };
     let _ = ready.send(Ok(name));
 
+    let mut input_method = if enable_input_method {
+        match InputMethodClient::new() {
+            Ok(client) => {
+                tracing::info!(
+                    "input-method-v2 direct commits enabled; this process owns the seat input method"
+                );
+                Some(client)
+            }
+            Err(error) => {
+                tracing::warn!(
+                    "input-method-v2 direct commits unavailable ({error}); using keyboard fallback"
+                );
+                None
+            }
+        }
+    } else {
+        None
+    };
+
     if name == "uinput" {
         // Let the hotplug watcher discover and exclude our virtual device.
         std::thread::sleep(std::time::Duration::from_millis(200));
@@ -848,10 +1413,44 @@ fn injection_thread(
 
     while let Ok(command) = cmd_rx.recv() {
         match command {
-            InjectionCmd::Text { text, done } => {
+            InjectionCmd::Text {
+                text,
+                compose_non_bmp,
+                compose_timing,
+                done,
+            } => {
                 let result = keyboard
-                    .send_text(&text, delay_ms.load(Ordering::Relaxed))
+                    .send_text(
+                        &text,
+                        delay_ms.load(Ordering::Relaxed),
+                        compose_non_bmp,
+                        compose_timing,
+                    )
                     .map_err(|error| error.to_string());
+                let _ = done.send(result);
+            }
+            InjectionCmd::ReplaceWithInputMethod {
+                original,
+                text,
+                done,
+            } => {
+                let (result, retire) = input_method.as_mut().map_or_else(
+                    || {
+                        (
+                            InputMethodCommitResult::NotCommitted(
+                                "input-method-v2 was not enabled or is unavailable".into(),
+                            ),
+                            false,
+                        )
+                    },
+                    |client| {
+                        let result = client.commit_replacement(&original, &text);
+                        (result, client.is_unavailable())
+                    },
+                );
+                if retire {
+                    input_method = None;
+                }
                 let _ = done.send(result);
             }
             InjectionCmd::RefreshTextKeymap { characters, done } => {
@@ -1034,7 +1633,7 @@ mod tests {
 
     #[test]
     fn persistent_text_keymap_has_level_zero_unicode() {
-        let maps = build_text_keymaps("A€¯ツ");
+        let maps = build_text_keymaps("A€¯ツ🧐");
         assert_eq!(maps.len(), 1);
         let (keymap, codes) = &maps[0];
         let context = xkb::Context::new(xkb::CONTEXT_NO_FLAGS);
@@ -1046,7 +1645,7 @@ mod tests {
         )
         .expect("generated keymap should parse");
         let lookup = KeymapLookup::build_from_xkb(&parsed);
-        for character in ['A', '€', '¯', 'ツ'] {
+        for character in ['A', '€', '¯', 'ツ', '🧐'] {
             assert!(codes.contains_key(&character));
             assert!(SAFE_TEXT_CODES.contains(&codes[&character]));
             assert_eq!(lookup.lookup(character).unwrap().level, 0);
@@ -1067,10 +1666,212 @@ mod tests {
     fn wayland_text_is_fully_resolved_before_injection() {
         let codes = HashMap::from([('a', (0, 30)), ('b', (0, 48))]);
         assert_eq!(
-            resolve_text_codes(&codes, "ab").unwrap(),
-            [(0, 30), (0, 48)]
+            resolve_wayland_text(&codes, "ab🦀", true).unwrap(),
+            [
+                WaylandTextStroke::Keymap(0, 30),
+                WaylandTextStroke::Keymap(0, 48),
+                WaylandTextStroke::Unicode('🦀')
+            ]
         );
-        assert!(resolve_text_codes(&codes, "ab🦀").is_err());
+        let direct_codes = HashMap::from([('🦀', (1, 46))]);
+        assert_eq!(
+            resolve_wayland_text(&direct_codes, "🦀", false).unwrap(),
+            [WaylandTextStroke::Keymap(1, 46)]
+        );
+    }
+
+    #[test]
+    fn unicode_compose_resolves_a_complete_modifier_safe_sequence() {
+        let keymap = KeymapLookup {
+            table: HashMap::from([
+                (
+                    'u',
+                    KeyInfo {
+                        evdev_code: 22,
+                        level: 0,
+                    },
+                ),
+                (
+                    '1',
+                    KeyInfo {
+                        evdev_code: 2,
+                        level: 1,
+                    },
+                ),
+                (
+                    'f',
+                    KeyInfo {
+                        evdev_code: 33,
+                        level: 2,
+                    },
+                ),
+                (
+                    '9',
+                    KeyInfo {
+                        evdev_code: 10,
+                        level: 0,
+                    },
+                ),
+                (
+                    'd',
+                    KeyInfo {
+                        evdev_code: 32,
+                        level: 3,
+                    },
+                ),
+                (
+                    '0',
+                    KeyInfo {
+                        evdev_code: 11,
+                        level: 0,
+                    },
+                ),
+            ]),
+            input_table: HashMap::new(),
+        };
+        assert_eq!(
+            resolve_unicode_compose(&keymap, '🧐').unwrap(),
+            [
+                ComposeKey {
+                    code: 22,
+                    control: true,
+                    shift: true,
+                    altgr: false,
+                },
+                ComposeKey {
+                    code: 2,
+                    control: false,
+                    shift: true,
+                    altgr: false,
+                },
+                ComposeKey {
+                    code: 33,
+                    control: false,
+                    shift: false,
+                    altgr: true,
+                },
+                ComposeKey {
+                    code: 10,
+                    control: false,
+                    shift: false,
+                    altgr: false,
+                },
+                ComposeKey {
+                    code: 32,
+                    control: false,
+                    shift: true,
+                    altgr: true,
+                },
+                ComposeKey {
+                    code: 11,
+                    control: false,
+                    shift: false,
+                    altgr: false,
+                },
+                ComposeKey {
+                    code: 28,
+                    control: false,
+                    shift: false,
+                    altgr: false,
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn unicode_compose_fails_before_injection_when_a_hex_key_is_missing() {
+        let keymap = KeymapLookup {
+            table: HashMap::from([(
+                'u',
+                KeyInfo {
+                    evdev_code: 22,
+                    level: 0,
+                },
+            )]),
+            input_table: HashMap::new(),
+        };
+        let error = resolve_unicode_compose(&keymap, '🙂').unwrap_err();
+        assert!(error.to_string().contains("compose key '1'"));
+    }
+
+    #[test]
+    fn wayland_text_timeout_includes_each_compose_sequence() {
+        let timing = ComposeTiming {
+            delay_ms: 5,
+            settle_ms: 10,
+        };
+        assert_eq!(
+            wayland_text_timeout("plain", true, timing),
+            std::time::Duration::from_millis(2_000)
+        );
+        assert_eq!(
+            wayland_text_timeout("🙂", true, timing),
+            std::time::Duration::from_millis(2_055)
+        );
+        assert_eq!(
+            wayland_text_timeout("🙂🧐", true, timing),
+            std::time::Duration::from_millis(2_110)
+        );
+        assert_eq!(
+            wayland_text_timeout("🙂", false, timing),
+            std::time::Duration::from_millis(2_000)
+        );
+    }
+
+    #[test]
+    fn compose_deletion_keeps_the_safer_settle_interval() {
+        assert_eq!(compose_delete_settle_ms(0, 10), 10);
+        assert_eq!(compose_delete_settle_ms(20, 10), 20);
+    }
+
+    #[test]
+    fn input_method_activation_is_applied_only_on_done() {
+        let mut lifecycle = InputMethodLifecycle::default();
+        assert!(!lifecycle.can_commit());
+
+        lifecycle.activate();
+        lifecycle.set_surrounding("before ;sm".into(), 10, 10);
+        assert!(!lifecycle.can_commit());
+        assert_eq!(lifecycle.serial, 0);
+
+        lifecycle.done();
+        assert!(lifecycle.can_commit());
+        assert!(lifecycle.can_replace(";sm"));
+        assert_eq!(lifecycle.serial, 1);
+    }
+
+    #[test]
+    fn input_method_replacement_requires_an_exact_unselected_suffix() {
+        let mut lifecycle = InputMethodLifecycle::default();
+        lifecycle.activate();
+        lifecycle.set_surrounding("mail ;🙂".into(), 10, 10);
+        lifecycle.done();
+        assert!(lifecycle.can_replace(";🙂"));
+        assert!(!lifecycle.can_replace(";sm"));
+
+        lifecycle.set_surrounding("mail ;🙂".into(), 10, 5);
+        lifecycle.done();
+        assert!(!lifecycle.can_replace(";🙂"));
+    }
+
+    #[test]
+    fn input_method_deactivation_and_unavailable_are_fail_closed() {
+        let mut lifecycle = InputMethodLifecycle::default();
+        lifecycle.activate();
+        lifecycle.set_surrounding(";sm".into(), 3, 3);
+        lifecycle.done();
+        assert!(lifecycle.can_commit());
+
+        lifecycle.deactivate();
+        assert!(!lifecycle.can_commit());
+        lifecycle.done();
+        assert!(!lifecycle.can_commit());
+        assert_eq!(lifecycle.serial, 2);
+
+        lifecycle.activate();
+        lifecycle.make_unavailable();
+        lifecycle.done();
+        assert!(!lifecycle.can_commit());
     }
 
     #[test]

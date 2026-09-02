@@ -340,7 +340,7 @@ fn init_config() -> anyhow::Result<()> {
     let matches = match_dir.join("base.yml");
     write_new(
         &settings,
-        "trigger_mode: space\nterminators: [space]\ninjection_backend: auto\ninjection_delay_ms: 1\nwayland_injection_delay_ms: 0\nuinput_injection_delay_ms: 1\ninjection_settle_ms: 10\n",
+        "trigger_mode: space\nterminators: [space]\ninjection_backend: auto\nnon_bmp_input: auto\ninjection_delay_ms: 1\nwayland_injection_delay_ms: 0\nuinput_injection_delay_ms: 1\ninjection_settle_ms: 10\ncompose_delay_ms: 5\ncompose_settle_ms: 10\n",
     )?;
     write_new(
         &matches,
@@ -361,7 +361,7 @@ fn ensure_config() -> anyhow::Result<()> {
     if !settings.exists() {
         write_new(
             &settings,
-            "trigger_mode: space\nterminators: [space]\ninjection_backend: auto\ninjection_delay_ms: 1\nwayland_injection_delay_ms: 0\nuinput_injection_delay_ms: 1\ninjection_settle_ms: 10\n",
+            "trigger_mode: space\nterminators: [space]\ninjection_backend: auto\nnon_bmp_input: auto\ninjection_delay_ms: 1\nwayland_injection_delay_ms: 0\nuinput_injection_delay_ms: 1\ninjection_settle_ms: 10\ncompose_delay_ms: 5\ncompose_settle_ms: 10\n",
         )?;
     }
 
@@ -637,6 +637,7 @@ fn install_service() -> anyhow::Result<()> {
     // `enable --now` does not restart an already active service. An explicit
     // restart guarantees that upgrades run the invoking binary.
     run_systemctl(&["restart", "snipexpand.service"])?;
+    wait_for_daemon()?;
 
     println!("SnipExpand service installed and started.");
     if !in_group("input") {
@@ -646,6 +647,22 @@ fn install_service() -> anyhow::Result<()> {
         println!("  # Then log out and back in");
     }
     Ok(())
+}
+
+fn wait_for_daemon() -> anyhow::Result<()> {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+    loop {
+        match daemon_status() {
+            Ok(_) => return Ok(()),
+            Err(error) if std::time::Instant::now() < deadline => {
+                std::thread::sleep(std::time::Duration::from_millis(50));
+                drop(error);
+            }
+            Err(error) => {
+                return Err(error.context("service started, but the daemon did not become ready"));
+            }
+        }
+    }
 }
 
 fn service_definition(binary: &std::path::Path) -> String {

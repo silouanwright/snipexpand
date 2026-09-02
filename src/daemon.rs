@@ -4,9 +4,9 @@ use std::sync::{Arc, Mutex};
 use tokio::io::AsyncWriteExt;
 use tokio::signal::unix::{signal, SignalKind};
 
-use crate::config::Config;
+use crate::config::{Config, NonBmpInput};
 use crate::expander::Expander;
-use crate::injector::Injector;
+use crate::injector::{ComposeTiming, Injector, InjectorOptions, InputMethodCommitResult};
 use crate::ipc::{IpcCmd, IpcServer};
 use crate::keyboard::{KeyboardEvent, KeyboardStream};
 
@@ -114,14 +114,19 @@ pub async fn run(config: Config) -> Result<()> {
     log_config_warnings(&config);
 
     // Spawn Wayland thread (blocks until keymap received)
-    let injector = Injector::spawn(
-        config.settings.injection_backend,
-        config.settings.injection_delay_ms,
-        config.settings.wayland_injection_delay_ms,
-        config.settings.uinput_injection_delay_ms,
-        config.settings.injection_settle_ms,
-        wayland_text_characters(&config),
-    )?;
+    let injector = Injector::spawn(InjectorOptions {
+        backend: config.settings.injection_backend,
+        enable_input_method: config.settings.requests_input_method(),
+        delay_ms: config.settings.injection_delay_ms,
+        wayland_delay_ms: config.settings.wayland_injection_delay_ms,
+        uinput_delay_ms: config.settings.uinput_injection_delay_ms,
+        settle_ms: config.settings.injection_settle_ms,
+        compose_timing: ComposeTiming {
+            delay_ms: config.settings.compose_delay_ms,
+            settle_ms: config.settings.compose_settle_ms,
+        },
+        wayland_text_chars: wayland_text_characters(&config),
+    })?;
     tracing::info!("Injection keyboard ready");
 
     // Open evdev keyboard stream
@@ -487,8 +492,54 @@ fn inject_expansion(
             ),
         }
     }
-    injector.backspace(expansion.delete_count);
-    type_with_fallback(injector, &expansion.text);
+    let strategy = non_bmp_strategy(config, &expansion.text);
+    let mut input_method_attempted = false;
+    let compose_non_bmp = match strategy {
+        NonBmpStrategy::Keymap => false,
+        NonBmpStrategy::Compose => true,
+        NonBmpStrategy::InputMethod { fallback_compose } => {
+            input_method_attempted = true;
+            match injector.replace_with_input_method(&expansion.undo_text, &expansion.text) {
+                InputMethodCommitResult::Committed => {
+                    injector.position_cursor(&expansion.text, expansion.cursor_back);
+                    if let Err(error) = injector.flush() {
+                        tracing::error!(
+                            "Could not finish input-method-v2 expansion injection: {}",
+                            error
+                        );
+                    }
+                    let undo_enabled = config.lock().unwrap().settings.undo_enabled;
+                    return (undo_enabled
+                        && expansion.cursor_back == 0
+                        && !expansion.text.contains('\n'))
+                    .then(|| Undo {
+                        replacement_len: expansion.text.chars().count(),
+                        original: expansion.undo_text,
+                    });
+                }
+                InputMethodCommitResult::NotCommitted(reason) => {
+                    tracing::debug!(
+                        "input-method-v2 direct commit unavailable ({reason}); using the keyboard fallback"
+                    );
+                }
+                InputMethodCommitResult::Indeterminate(reason) => {
+                    tracing::error!(
+                        "{reason}; refusing a keyboard retry because the target may already contain the replacement"
+                    );
+                    return None;
+                }
+            }
+            fallback_compose
+        }
+    };
+    if input_method_attempted {
+        injector.backspace_without_settle(expansion.delete_count);
+    } else if compose_non_bmp {
+        injector.backspace_for_compose(expansion.delete_count);
+    } else {
+        injector.backspace(expansion.delete_count);
+    }
+    type_with_fallback(injector, &expansion.text, compose_non_bmp);
     injector.position_cursor(&expansion.text, expansion.cursor_back);
     if let Err(error) = injector.flush() {
         tracing::error!("Could not finish expansion injection: {}", error);
@@ -500,10 +551,17 @@ fn inject_expansion(
     })
 }
 
-fn type_with_fallback(injector: &Injector, text: &str) {
+fn type_with_fallback(injector: &Injector, text: &str, compose_non_bmp: bool) {
     if injector.backend() == "wayland" {
-        match injector.type_wayland_text(text) {
+        match injector.type_wayland_text(text, compose_non_bmp) {
             Ok(()) => return,
+            Err(error) if compose_non_bmp => {
+                tracing::error!(
+                    "Wayland text injection failed after entering compose mode; refusing an unsafe retry: {}",
+                    error
+                );
+                return;
+            }
             Err(error) => tracing::warn!("Persistent Wayland text unavailable: {}", error),
         }
     }
@@ -511,6 +569,44 @@ fn type_with_fallback(injector: &Injector, text: &str) {
         injector.type_text(text);
     } else if let Err(error) = injector.type_unicode(text) {
         tracing::error!("Unicode fallback failed: {}", error);
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum NonBmpStrategy {
+    Keymap,
+    Compose,
+    InputMethod { fallback_compose: bool },
+}
+
+fn non_bmp_strategy(config: &Arc<Mutex<Config>>, text: &str) -> NonBmpStrategy {
+    if !text.chars().any(|character| character as u32 > 0xffff) {
+        return NonBmpStrategy::Keymap;
+    }
+    let app = crate::app::detect().ok();
+    let cfg = config.lock().unwrap();
+    let mode = app
+        .as_ref()
+        .and_then(|app| cfg.settings.profile_index(app))
+        .and_then(|index| cfg.settings.app_profiles[index].non_bmp_input)
+        .unwrap_or(cfg.settings.non_bmp_input);
+    strategy_for_app(mode, app.as_ref())
+}
+
+fn strategy_for_app(mode: NonBmpInput, app: Option<&crate::app::AppInfo>) -> NonBmpStrategy {
+    match mode {
+        NonBmpInput::Keymap => NonBmpStrategy::Keymap,
+        NonBmpInput::Compose => NonBmpStrategy::Compose,
+        NonBmpInput::InputMethod => NonBmpStrategy::InputMethod {
+            fallback_compose: app.is_some_and(crate::app::AppInfo::uses_chromium_text_input),
+        },
+        NonBmpInput::Auto => {
+            if app.is_some_and(crate::app::AppInfo::uses_chromium_text_input) {
+                NonBmpStrategy::Compose
+            } else {
+                NonBmpStrategy::Keymap
+            }
+        }
     }
 }
 
@@ -532,15 +628,20 @@ fn reload_config(
 ) {
     match Config::load_default() {
         Ok(new_cfg) => {
-            let (backend_changed, text_characters_changed) = {
+            let (backend_changed, input_method_changed, text_characters_changed) = {
                 let current = config.lock().unwrap();
                 (
                     new_cfg.settings.injection_backend != current.settings.injection_backend,
+                    new_cfg.settings.requests_input_method()
+                        != current.settings.requests_input_method(),
                     wayland_text_characters(&new_cfg) != wayland_text_characters(&current),
                 )
             };
             if backend_changed {
                 tracing::warn!("injection_backend changes require a daemon restart");
+            }
+            if input_method_changed {
+                tracing::warn!("input-method-v2 enablement changes require a daemon restart");
             }
             expander.update_configured(
                 new_cfg.matches.clone(),
@@ -551,6 +652,10 @@ fn reload_config(
             );
             injector.set_delay_ms(new_cfg.settings.injection_delay_for(injector.backend()));
             injector.set_settle_ms(new_cfg.settings.injection_settle_ms);
+            injector.set_compose_timing(
+                new_cfg.settings.compose_delay_ms,
+                new_cfg.settings.compose_settle_ms,
+            );
             if text_characters_changed {
                 if let Err(error) =
                     injector.refresh_wayland_text_keymap(wayland_text_characters(&new_cfg))
@@ -645,6 +750,14 @@ fn refresh_app_profile(
             .and_then(|profile| profile.injection_settle_ms)
             .unwrap_or(cfg.settings.injection_settle_ms),
     );
+    injector.set_compose_timing(
+        selected
+            .and_then(|profile| profile.compose_delay_ms)
+            .unwrap_or(cfg.settings.compose_delay_ms),
+        selected
+            .and_then(|profile| profile.compose_settle_ms)
+            .unwrap_or(cfg.settings.compose_settle_ms),
+    );
     input.active_profile = profile;
     input.profile_initialized = true;
 }
@@ -678,6 +791,46 @@ mod tests {
             vec![(trigger.to_string(), "expanded".to_string())],
             TriggerMode::Immediate,
         )
+    }
+
+    #[test]
+    fn non_bmp_strategy_is_app_aware_and_can_be_overridden() {
+        let chromium = crate::app::AppInfo {
+            exec: Some("/usr/lib/chromium/chromium".into()),
+            ..Default::default()
+        };
+        let terminal = crate::app::AppInfo {
+            class: Some("foot".into()),
+            ..Default::default()
+        };
+        assert_eq!(
+            strategy_for_app(NonBmpInput::Auto, Some(&chromium)),
+            NonBmpStrategy::Compose
+        );
+        assert_eq!(
+            strategy_for_app(NonBmpInput::Auto, Some(&terminal)),
+            NonBmpStrategy::Keymap
+        );
+        assert_eq!(
+            strategy_for_app(NonBmpInput::Keymap, Some(&chromium)),
+            NonBmpStrategy::Keymap
+        );
+        assert_eq!(
+            strategy_for_app(NonBmpInput::Compose, Some(&terminal)),
+            NonBmpStrategy::Compose
+        );
+        assert_eq!(
+            strategy_for_app(NonBmpInput::InputMethod, Some(&chromium)),
+            NonBmpStrategy::InputMethod {
+                fallback_compose: true
+            }
+        );
+        assert_eq!(
+            strategy_for_app(NonBmpInput::InputMethod, Some(&terminal)),
+            NonBmpStrategy::InputMethod {
+                fallback_compose: false
+            }
+        );
     }
 
     #[test]

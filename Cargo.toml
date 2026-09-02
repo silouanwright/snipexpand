@@ -2,6 +2,7 @@
 name = "snipexpand"
 version = "0.4.0"
 edition = "2021"
+default-run = "snipexpand"
 description = "Fast, config-based text expansion for Linux and Wayland"
 license = "GPL-3.0-or-later"
 repository = "https://github.com/silouanwright/snipexpand"
@@ -27,7 +28,7 @@ tokio = { version = "1", features = ["full"] }
 futures = "0.3"
 tokio-stream = "0.1"
 
-# Wayland (for XKB keymap retrieval only)
+# Wayland keymaps, virtual-keyboard injection, and optional direct text commit
 wayland-client = "0.31"
 wayland-protocols-misc = { version = "0.3", features = ["client"] }
 
