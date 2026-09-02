@@ -152,5 +152,6 @@ and `wl-clipboard` 2.3.0. Firefox is not installed.
 3. Re-run the complete release validation before deciding whether these changes
    warrant v0.4.1.
 
-None of the compatibility or product changes in this checkpoint have been
-committed, pushed, tagged, or released.
+The compatibility and product changes in this checkpoint are preserved on
+`codex/wayland-unicode-compatibility`. Nothing has been pushed, tagged, or
+released.
