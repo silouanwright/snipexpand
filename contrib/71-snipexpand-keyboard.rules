@@ -1,0 +1,3 @@
+# Allow the active local desktop session to read keyboard events for SnipExpand.
+# Keep access to other input devices restricted; no input-group membership needed.
+SUBSYSTEM=="input", KERNEL=="event*", ENV{ID_INPUT_KEYBOARD}=="1", TAG+="uaccess"

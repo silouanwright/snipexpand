@@ -6,6 +6,7 @@ mod injector;
 mod ipc;
 mod keyboard;
 mod packs;
+mod permissions;
 
 use clap::{Parser, Subcommand};
 
@@ -74,7 +75,11 @@ enum Cmd {
         json: bool,
     },
     /// Initialize configuration and install the systemd user service
-    Install,
+    Install {
+        /// Grant the active local desktop session keyboard access through udev (requires administrator authentication)
+        #[arg(long)]
+        keyboard_access: bool,
+    },
     /// Stop and remove the user service while preserving configuration
     Uninstall,
     /// Install and manage Git-published snippet packs
@@ -128,6 +133,9 @@ enum PackCmd {
 
 fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
+    if matches!(cli.command, Some(Cmd::Install { .. })) && unsafe { libc::geteuid() } == 0 {
+        anyhow::bail!("Run snipexpand install as your desktop user, not root. Use --keyboard-access to request administrator authentication for device permissions only.");
+    }
     ensure_config()?;
     match cli.command {
         None => {
@@ -273,7 +281,10 @@ fn handle_cmd(cmd: Cmd) -> anyhow::Result<()> {
             }
         }
 
-        Cmd::Install => {
+        Cmd::Install { keyboard_access } => {
+            if keyboard_access {
+                permissions::install_keyboard_access()?;
+            }
             install_service()?;
         }
         Cmd::Uninstall => {
@@ -480,13 +491,7 @@ fn doctor(json: bool) {
             None,
             "Log in to a Wayland session",
         ),
-        doctor_check(
-            "input_group",
-            "input group",
-            in_group("input"),
-            None,
-            "Add your user to the input group, then log out and back in",
-        ),
+        keyboard_access_check(keyboard::accessible_keyboard_count()),
         doctor_check(
             "uinput_writable",
             "/dev/uinput writable",
@@ -529,6 +534,12 @@ fn doctor(json: bool) {
     } else {
         for check in &report.checks {
             println!("{} {}", if check.ok { "✓" } else { "✗" }, check.label);
+            if let Some(detail) = &check.detail {
+                println!("  {detail}");
+            }
+            if let Some(fix) = check.fix {
+                println!("  {fix}");
+            }
         }
     }
     if !report.ok {
@@ -557,16 +568,21 @@ fn command_exists(name: &str) -> bool {
         .is_some_and(|paths| std::env::split_paths(&paths).any(|dir| dir.join(name).is_file()))
 }
 
-fn in_group(name: &str) -> bool {
-    std::process::Command::new("id")
-        .arg("-nG")
-        .output()
-        .is_ok_and(|output| {
-            output.status.success()
-                && String::from_utf8_lossy(&output.stdout)
-                    .split_whitespace()
-                    .any(|group| group == name)
-        })
+fn keyboard_access_check(result: anyhow::Result<usize>) -> DoctorCheck {
+    let (ok, detail) = match result {
+        Ok(count) => (
+            count > 0,
+            (count == 0).then(|| "No readable keyboard devices were found".to_owned()),
+        ),
+        Err(error) => (false, Some(error.to_string())),
+    };
+    doctor_check(
+        "keyboard_access",
+        "Keyboard read access",
+        ok,
+        detail,
+        "Connect a keyboard and run snipexpand install --keyboard-access from your local desktop session",
+    )
 }
 
 fn can_open_uinput() -> bool {
@@ -637,15 +653,30 @@ fn install_service() -> anyhow::Result<()> {
     // `enable --now` does not restart an already active service. An explicit
     // restart guarantees that upgrades run the invoking binary.
     run_systemctl(&["restart", "snipexpand.service"])?;
+    wait_for_daemon()?;
 
-    println!("SnipExpand service installed and started.");
-    if !in_group("input") {
-        println!();
-        println!("Input-device access still needs permission:");
-        println!("  sudo usermod -a -G input $USER");
-        println!("  # Then log out and back in");
+    let access = keyboard_access_check(keyboard::accessible_keyboard_count());
+    if !access.ok {
+        anyhow::bail!("Service installed, but automatic expansion is not ready: {}. {}. Run snipexpand doctor for diagnostics.", access.detail.as_deref().unwrap_or("keyboard access is missing"), access.fix.unwrap_or_default());
     }
+    println!("SnipExpand service installed and started; keyboard access verified.");
     Ok(())
+}
+
+fn wait_for_daemon() -> anyhow::Result<()> {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+    loop {
+        match daemon_status() {
+            Ok(_) => return Ok(()),
+            Err(error) if std::time::Instant::now() < deadline => {
+                std::thread::sleep(std::time::Duration::from_millis(50));
+                drop(error);
+            }
+            Err(error) => {
+                return Err(error.context("service started, but the daemon did not become ready"));
+            }
+        }
+    }
 }
 
 fn service_definition(binary: &std::path::Path) -> String {
@@ -740,6 +771,45 @@ mod tests {
             std::fs::metadata(&path).unwrap().modified().unwrap(),
             modified
         );
+    }
+
+    #[test]
+    fn keyboard_diagnostics_require_a_readable_keyboard() {
+        let accessible = keyboard_access_check(Ok(2));
+        assert!(accessible.ok);
+        assert_eq!(accessible.id, "keyboard_access");
+        assert!(accessible.fix.is_none());
+
+        let empty = keyboard_access_check(Ok(0));
+        assert!(!empty.ok);
+        assert!(empty.fix.unwrap().contains("--keyboard-access"));
+
+        let denied = keyboard_access_check(Err(std::io::Error::from(
+            std::io::ErrorKind::PermissionDenied,
+        )
+        .into()));
+        assert!(!denied.ok);
+        assert!(denied.detail.unwrap().contains("permission denied"));
+    }
+
+    #[test]
+    fn keyboard_permission_install_requires_an_explicit_flag() {
+        assert!(matches!(
+            Cli::try_parse_from(["snipexpand", "install"])
+                .unwrap()
+                .command,
+            Some(Cmd::Install {
+                keyboard_access: false
+            })
+        ));
+        assert!(matches!(
+            Cli::try_parse_from(["snipexpand", "install", "--keyboard-access"])
+                .unwrap()
+                .command,
+            Some(Cmd::Install {
+                keyboard_access: true
+            })
+        ));
     }
 
     #[test]

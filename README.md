@@ -52,11 +52,10 @@ SnipExpand with the alternatives below.
 
 ## Requirements
 
-Omarchy includes everything SnipExpand needs by default. On other Wayland
-systems, you need:
+Run SnipExpand from a local Wayland desktop session with:
 
 - `libxkbcommon` and Wayland client libraries
-- Read access to `/dev/input/event*`, usually through the system `input` group
+- Read access to keyboard devices under `/dev/input/` (see setup below)
 - `wtype` for the Unicode fallback path
 
 ## Install
@@ -73,12 +72,52 @@ Prebuilt x86_64 and aarch64 binaries are available from
 ## Set up
 
 ```bash
-snipexpand install
+snipexpand install --keyboard-access
+snipexpand doctor
 ```
 
-This creates any missing starter files without overwriting your config, then
-starts the service and enables it for future sessions. Run `snipexpand doctor`
-if setup or expansion does not work.
+Run these commands as your desktop user. The `--keyboard-access` option requests
+administrator authentication to install a keyboard-only udev rule. The rule
+grants keyboard access to the active local session and applies again after a
+reboot or keyboard reconnect. It does not add your user to the `input` group.
+
+Setup creates missing starter files without overwriting your config, then
+starts and enables the user service. It checks that a keyboard can actually be read before
+reporting success. If your system already provides keyboard access, you can
+use `snipexpand install` without the flag.
+
+### Manual keyboard permissions
+
+On a system using systemd-logind and udev, an administrator can install the same
+rule manually. This also works with older SnipExpand releases that do not have
+`--keyboard-access`:
+
+```bash
+sudo tee /etc/udev/rules.d/71-snipexpand-keyboard.rules >/dev/null <<'EOF'
+SUBSYSTEM=="input", KERNEL=="event*", ENV{ID_INPUT_KEYBOARD}=="1", TAG+="uaccess"
+EOF
+sudo udevadm control --reload-rules
+sudo udevadm trigger --action=change --subsystem-match=input --property-match=ID_INPUT_KEYBOARD=1 --settle
+systemctl --user restart snipexpand
+```
+
+Package maintainers can ship `contrib/71-snipexpand-keyboard.rules` in their
+distribution's udev rules directory. The CLI embeds the rule, so binaries and
+crates.io installs can configure it through `--keyboard-access` too. The automatic
+setup refuses to overwrite a different existing rule at its destination.
+
+If your system does not support active-session udev access, follow its input
+device permission policy. Membership in the `input` group is another option,
+but grants access to additional input devices and requires a new login.
+
+### Service runs, but typed triggers do not expand
+
+Run `snipexpand doctor`. A running service or a successful paste from the Omarchy
+panel only confirms that SnipExpand can send text. Automatic expansion also
+requires keyboard read access. Restarting the service cannot repair a missing
+permission. Current diagnostics test actual keyboard access; older releases
+check only `input` group membership and may report failure even with a working
+udev rule.
 
 ## AI agents
 

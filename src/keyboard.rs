@@ -52,6 +52,11 @@ impl Drop for KeyboardStream {
 // Helpers
 // ---------------------------------------------------------------------------
 
+/// Count keyboards this process can actually open, regardless of group membership.
+pub fn accessible_keyboard_count() -> anyhow::Result<usize> {
+    Ok(discover_keyboards()?.len())
+}
+
 /// Scan `/dev/input/event*` and return paths + already-opened devices for confirmed keyboards.
 fn discover_keyboards() -> anyhow::Result<Vec<(PathBuf, evdev::Device)>> {
     let mut keyboards = Vec::new();
