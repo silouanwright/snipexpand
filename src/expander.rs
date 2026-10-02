@@ -152,6 +152,9 @@ impl Expander {
     }
 
     pub fn push_char(&mut self, c: char) -> Option<Expansion> {
+        if self.max_trigger_len == 0 {
+            return None;
+        }
         if self.trigger_mode == TriggerMode::Space && self.terminators.contains(&c) {
             let expansion = self.find_match(Some(c));
             self.buffer.clear();
@@ -160,13 +163,9 @@ impl Expander {
 
         self.buffer.push_back(c);
 
-        // Keep one character before the longest trigger for left-word checks.
-        while self.max_trigger_len > 0 && self.buffer.len() > self.max_trigger_len + 1 {
+        // Keep a left boundary and a possible trailing separator for word checks.
+        while self.buffer.len() > self.max_trigger_len + 2 {
             self.buffer.pop_front();
-        }
-
-        if self.max_trigger_len == 0 {
-            return None;
         }
 
         if self.trigger_mode == TriggerMode::Space {
@@ -331,20 +330,30 @@ fn compile_matches<T: IntoCompiledMatches>(matches: Vec<T>) -> Vec<CompiledMatch
     for item in matches {
         item.append_compiled(&mut compiled);
     }
-    let mut causes = HashMap::<String, usize>::new();
+    let mut causes = HashMap::<(bool, String), usize>::new();
+    let mut folded = HashMap::<String, (usize, bool)>::new();
     for item in &compiled {
         let cause = item
             .regex
             .as_ref()
             .map_or_else(|| item.trigger.clone(), |regex| regex.as_str().to_string());
-        *causes.entry(cause).or_default() += 1;
+        *causes.entry((item.regex.is_some(), cause)).or_default() += 1;
+        if item.regex.is_none() {
+            let entry = folded.entry(item.trigger.to_lowercase()).or_default();
+            entry.0 += 1;
+            entry.1 |= item.propagate_case;
+        }
     }
     for item in &mut compiled {
         let cause = item
             .regex
             .as_ref()
             .map_or_else(|| item.trigger.clone(), |regex| regex.as_str().to_string());
-        item.ambiguous = causes[&cause] > 1;
+        item.ambiguous = causes[&(item.regex.is_some(), cause)] > 1
+            || (item.regex.is_none()
+                && folded
+                    .get(&item.trigger.to_lowercase())
+                    .is_some_and(|(count, insensitive)| *count > 1 && *insensitive));
     }
     compiled.sort_by_key(|item| std::cmp::Reverse(item.trigger.chars().count()));
     compiled
@@ -487,11 +496,15 @@ fn prepare_replacement(replacement: &str) -> (String, usize) {
 }
 
 #[cfg(test)]
+#[path = "expander_properties.rs"]
+mod properties;
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use std::path::PathBuf;
 
-    fn structured_match(trigger: &str, replace: &str) -> Match {
+    pub(super) fn structured_match(trigger: &str, replace: &str) -> Match {
         Match {
             triggers: vec![trigger.to_string()],
             regex: None,
