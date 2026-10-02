@@ -3,6 +3,23 @@
 This is the prioritized product backlog. Within each group, work from top to
 bottom unless user feedback provides a stronger signal.
 
+## v0.5.0 integration and release — 2026-10-02
+
+- [x] Integrate authoring/reliability/groups with the preserved Unicode/Fcitx work.
+- [x] Add native plugin group controls, persistence/error handling, and tests.
+- [x] Pass local Rust/C++ checks, package verification, and Ubuntu CI.
+- [x] Pass byte-exact Chromium, Electron, GTK, Qt, and clean Neovim delivery tests.
+- [x] Install the candidate daemon/bridge/plugin and preserve rollback backups.
+- [x] Push daemon and plugin changes to main.
+- [ ] Complete the final Signal allow/suppress smoke test in an unsent draft.
+  The focus guard stopped before input; a desktop timing choice is pending.
+- [ ] Verify the refreshed installed plugin view and keyboard controls.
+- [ ] Tag and publish the daemon and plugin, verify both release artifacts and
+  crates.io publication, and record final delivery evidence.
+
+Current evidence: [integration report](docs/release-0.5.0.md).
+Firefox/Zed and broader keyboard/layout campaigns remain backlog items below.
+
 ## Snippet authoring batch — 2026-10-01
 
 Implemented on `codex/snippet-authoring` and integrated with Unicode/Fcitx5
@@ -51,10 +68,11 @@ These tasks should come before adding major expansion features.
   - [x] Add reusable browser/Electron and Qt targets plus a byte-exact clipboard
     verifier for applications that cannot save the target buffer directly.
   - [ ] Finish application-aware non-BMP input validation. Chromium and Electron
-    use a paced, injector-owned compose sequence automatically, while terminal
-    applications retain direct modifier-free Wayland keymaps. Sequence,
-    modifier cleanup, and timing configuration have deterministic coverage;
-    guarded Chromium and Signal live retests remain.
+    use the optional Fcitx5 direct-commit bridge with a paced compose fallback;
+    terminal applications retain direct modifier-free Wayland keymaps. Current
+    Chromium/Electron byte-exact tests pass. Signal's final allow/suppress
+    policy smoke remains pending. Sequence, modifier cleanup, retry policy,
+    and timing configuration have deterministic coverage.
     - [x] Add an explicit input-method-v2 mode for direct UTF-8 commit when the
       focused client supports text-input-v3 and no other input method owns the
       seat. Keep it out of automatic routing because Omarchy's Fcitx5 already

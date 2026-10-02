@@ -24,7 +24,15 @@ Integration commit: `3dde657`. Plugin implementation: `9c5bb08`.
 bridge build/test pass. The schema includes all integrated Unicode settings.
 The plugin passes manifest validation, locked dependency verification, JS
 model tests, and a real Quickshell Process test for group changes, refresh,
-and error recovery. Light/dark native group views were rendered and inspected.
+and error recovery. Light/dark native group views were rendered and inspected,
+as were loading, empty, error, and unsupported-version states. The installed
+shell was restarted after updates settled to discard a confirmed stale panel;
+its IPC target responds, but the refreshed view still needs its final visual
+and keyboard check.
+
+[Ubuntu CI passed](https://github.com/silouanwright/snipexpand/actions/runs/36972172981)
+for daemon commit `c5d3682`, including the C++ bridge and all Rust tests. Package
+verification built the actual 60-file crate in a separate target directory.
 
 ## Live matrix — 2026-10-02
 
@@ -50,7 +58,6 @@ not compatibility results.
 
 The v0.5.0 candidate is installed locally and doctor reports keyboard access,
 service readiness, and the matching Fcitx bridge loaded. Publishing is pending.
-
 
 ## Scope limits
 
