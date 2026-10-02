@@ -21,6 +21,25 @@ pub enum InjectionBackend {
     Uinput,
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum NonBmpInput {
+    #[default]
+    Auto,
+    Keymap,
+    Compose,
+    Fcitx5,
+    InputMethod,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum FcitxSensitiveHint {
+    #[default]
+    Allow,
+    Suppress,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Terminator {
@@ -45,6 +64,12 @@ pub struct Settings {
     /// Injection transport. Auto prefers Wayland and falls back to uinput.
     #[serde(default)]
     pub injection_backend: InjectionBackend,
+    /// How Wayland enters Unicode characters above U+FFFF.
+    #[serde(default)]
+    pub non_bmp_input: NonBmpInput,
+    /// Whether Fcitx's non-password Sensitive hint suppresses direct commits.
+    #[serde(default)]
+    pub fcitx_sensitive_hint: FcitxSensitiveHint,
     /// Milliseconds to pause after each injected key release.
     #[serde(default = "default_injection_delay_ms")]
     pub injection_delay_ms: u64,
@@ -57,6 +82,12 @@ pub struct Settings {
     /// One-time pause before deleting a matched trigger.
     #[serde(default = "default_injection_settle_ms")]
     pub injection_settle_ms: u64,
+    /// Pause between keys in a numeric Unicode compose sequence.
+    #[serde(default = "default_compose_delay_ms")]
+    pub compose_delay_ms: u64,
+    /// Pause before and after a numeric Unicode compose sequence.
+    #[serde(default = "default_compose_settle_ms")]
+    pub compose_settle_ms: u64,
     #[serde(default)]
     pub app_exclusions: Vec<AppFilter>,
     #[serde(default)]
@@ -75,10 +106,14 @@ impl Default for Settings {
             word_separators: None,
             regex_max_buffer: default_regex_max_buffer(),
             injection_backend: InjectionBackend::Auto,
+            non_bmp_input: NonBmpInput::Auto,
+            fcitx_sensitive_hint: FcitxSensitiveHint::Allow,
             injection_delay_ms: default_injection_delay_ms(),
             wayland_injection_delay_ms: None,
             uinput_injection_delay_ms: None,
             injection_settle_ms: default_injection_settle_ms(),
+            compose_delay_ms: default_compose_delay_ms(),
+            compose_settle_ms: default_compose_settle_ms(),
             app_exclusions: Vec::new(),
             app_profiles: Vec::new(),
             snippet_groups: Vec::new(),
@@ -100,6 +135,14 @@ fn default_regex_max_buffer() -> usize {
 }
 
 fn default_injection_settle_ms() -> u64 {
+    10
+}
+
+fn default_compose_delay_ms() -> u64 {
+    5
+}
+
+fn default_compose_settle_ms() -> u64 {
     10
 }
 
@@ -153,6 +196,13 @@ impl Settings {
         .unwrap_or(self.injection_delay_ms)
     }
 
+    pub fn requests_input_method(&self) -> bool {
+        self.non_bmp_input == NonBmpInput::InputMethod
+            || self.app_profiles.iter().any(|profile| {
+                profile.enabled && profile.non_bmp_input == Some(NonBmpInput::InputMethod)
+            })
+    }
+
     pub fn profile_index(&self, app: &crate::app::AppInfo) -> Option<usize> {
         self.app_profiles
             .iter()
@@ -192,6 +242,14 @@ pub struct AppProfile {
     pub injection_delay_ms: Option<u64>,
     #[serde(default)]
     pub injection_settle_ms: Option<u64>,
+    #[serde(default)]
+    pub compose_delay_ms: Option<u64>,
+    #[serde(default)]
+    pub compose_settle_ms: Option<u64>,
+    #[serde(default)]
+    pub non_bmp_input: Option<NonBmpInput>,
+    #[serde(default)]
+    pub fcitx_sensitive_hint: Option<FcitxSensitiveHint>,
 }
 
 impl AppProfile {
@@ -219,6 +277,12 @@ impl AppProfile {
         }
         if self.injection_settle_ms.is_some_and(|value| value > 100) {
             bail!("app profile injection_settle_ms must be between 0 and 100");
+        }
+        if self.compose_delay_ms.is_some_and(|value| value > 50) {
+            bail!("app profile compose_delay_ms must be between 0 and 50");
+        }
+        if self.compose_settle_ms.is_some_and(|value| value > 100) {
+            bail!("app profile compose_settle_ms must be between 0 and 100");
         }
         validate_word_separators(self.word_separators.as_deref())
     }
@@ -599,6 +663,12 @@ impl Config {
         }
         if self.settings.injection_settle_ms > 100 {
             bail!("injection_settle_ms must be between 0 and 100");
+        }
+        if self.settings.compose_delay_ms > 50 {
+            bail!("compose_delay_ms must be between 0 and 50");
+        }
+        if self.settings.compose_settle_ms > 100 {
+            bail!("compose_settle_ms must be between 0 and 100");
         }
         if !(32..=4096).contains(&self.settings.regex_max_buffer) {
             bail!("regex_max_buffer must be between 32 and 4096");
@@ -1247,19 +1317,95 @@ matches:
         let dir = TempDir::new().unwrap();
         write(
             &dir.path().join("config.yml"),
-            "injection_backend: wayland\ninjection_delay_ms: 3\nwayland_injection_delay_ms: 0\nuinput_injection_delay_ms: 1\ninjection_settle_ms: 12\n",
+            "injection_backend: wayland\nnon_bmp_input: compose\ninjection_delay_ms: 3\nwayland_injection_delay_ms: 0\nuinput_injection_delay_ms: 1\ninjection_settle_ms: 12\ncompose_delay_ms: 7\ncompose_settle_ms: 14\n",
         );
         let config = Config::load_dir(dir.path()).unwrap();
         assert_eq!(config.settings.injection_backend, InjectionBackend::Wayland);
+        assert_eq!(config.settings.non_bmp_input, NonBmpInput::Compose);
         assert_eq!(config.settings.injection_delay_ms, 3);
         assert_eq!(config.settings.injection_delay_for("wayland"), 0);
         assert_eq!(config.settings.injection_delay_for("uinput"), 1);
         assert_eq!(config.settings.injection_delay_for("other"), 3);
         assert_eq!(config.settings.injection_settle_ms, 12);
+        assert_eq!(config.settings.compose_delay_ms, 7);
+        assert_eq!(config.settings.compose_settle_ms, 14);
 
         write(&dir.path().join("config.yml"), "injection_delay_ms: 51\n");
         let error = Config::load_dir(dir.path()).unwrap_err().to_string();
         assert!(error.contains("injection_delay_ms must be between 0 and 50"));
+
+        write(&dir.path().join("config.yml"), "compose_delay_ms: 51\n");
+        let error = Config::load_dir(dir.path()).unwrap_err().to_string();
+        assert!(error.contains("compose_delay_ms must be between 0 and 50"));
+
+        write(&dir.path().join("config.yml"), "compose_settle_ms: 101\n");
+        let error = Config::load_dir(dir.path()).unwrap_err().to_string();
+        assert!(error.contains("compose_settle_ms must be between 0 and 100"));
+    }
+
+    #[test]
+    fn input_method_is_opt_in_globally_or_by_profile() {
+        let dir = tempfile::tempdir().unwrap();
+        write(
+            &dir.path().join("config.yml"),
+            "non_bmp_input: input_method\n",
+        );
+        let config = Config::load_dir(dir.path()).unwrap();
+        assert!(config.settings.requests_input_method());
+
+        write(
+            &dir.path().join("config.yml"),
+            "app_profiles:\n  - name: Direct UTF-8\n    filter:\n      class: signal\n    non_bmp_input: input_method\n",
+        );
+        let config = Config::load_dir(dir.path()).unwrap();
+        assert!(config.settings.requests_input_method());
+
+        write(
+            &dir.path().join("config.yml"),
+            "app_profiles:\n  - name: Disabled direct UTF-8\n    filter:\n      class: signal\n    enabled: false\n    non_bmp_input: input_method\n",
+        );
+        let config = Config::load_dir(dir.path()).unwrap();
+        assert!(!config.settings.requests_input_method());
+
+        write(&dir.path().join("config.yml"), "non_bmp_input: auto\n");
+        let config = Config::load_dir(dir.path()).unwrap();
+        assert!(!config.settings.requests_input_method());
+
+        write(&dir.path().join("config.yml"), "non_bmp_input: fcitx5\n");
+        let config = Config::load_dir(dir.path()).unwrap();
+        assert_eq!(config.settings.non_bmp_input, NonBmpInput::Fcitx5);
+        assert!(!config.settings.requests_input_method());
+    }
+
+    #[test]
+    fn fcitx_sensitive_hint_defaults_to_allow_and_can_be_suppressed_per_app() {
+        let dir = tempfile::tempdir().unwrap();
+        write(&dir.path().join("config.yml"), "");
+        let config = Config::load_dir(dir.path()).unwrap();
+        assert_eq!(
+            config.settings.fcitx_sensitive_hint,
+            FcitxSensitiveHint::Allow
+        );
+
+        write(
+            &dir.path().join("config.yml"),
+            "fcitx_sensitive_hint: suppress\napp_profiles:\n  - name: Signal override\n    filter: { class: signal }\n    fcitx_sensitive_hint: allow\n",
+        );
+        let config = Config::load_dir(dir.path()).unwrap();
+        assert_eq!(
+            config.settings.fcitx_sensitive_hint,
+            FcitxSensitiveHint::Suppress
+        );
+        assert_eq!(
+            config.settings.app_profiles[0].fcitx_sensitive_hint,
+            Some(FcitxSensitiveHint::Allow)
+        );
+
+        write(
+            &dir.path().join("config.yml"),
+            "fcitx_sensitive_hint: sometimes\n",
+        );
+        assert!(Config::load_dir(dir.path()).is_err());
     }
 
     #[test]
@@ -1341,7 +1487,7 @@ matches:
         let dir = TempDir::new().unwrap();
         write(
             &dir.path().join("config.yml"),
-            "app_profiles:\n  - name: Browser\n    filter:\n      class: 'firefox'\n    include_match_files: [browser.yml]\n    trigger_mode: space\n    injection_delay_ms: 2\n",
+            "app_profiles:\n  - name: Browser\n    filter:\n      class: 'firefox'\n    include_match_files: [browser.yml]\n    trigger_mode: space\n    injection_delay_ms: 2\n    compose_delay_ms: 8\n    compose_settle_ms: 16\n    non_bmp_input: keymap\n",
         );
         write(
             &dir.path().join("match/browser.yml"),
@@ -1357,6 +1503,12 @@ matches:
             ..Default::default()
         });
         assert_eq!(profile, Some(0));
+        assert_eq!(
+            config.settings.app_profiles[0].non_bmp_input,
+            Some(NonBmpInput::Keymap)
+        );
+        assert_eq!(config.settings.app_profiles[0].compose_delay_ms, Some(8));
+        assert_eq!(config.settings.app_profiles[0].compose_settle_ms, Some(16));
         assert_eq!(config.matches_for_profile(profile).len(), 1);
         assert_eq!(config.matches_for_profile(profile)[0].triggers, [";web"]);
     }

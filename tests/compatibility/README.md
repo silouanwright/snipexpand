@@ -28,33 +28,73 @@ Stop any normal SnipExpand daemon, then start an isolated one:
 XDG_CONFIG_HOME="$PWD/tests/compatibility/config" target/debug/snipexpand
 ```
 
-In a separate terminal, create and focus a disposable Neovim buffer:
+In a separate terminal, launch the isolated clean-Neovim target:
 
 ```bash
-test_file=$(mktemp)
-nvim --clean -n "$test_file" -c startinsert
+tests/compatibility/launch-target.sh nvim
 ```
 
 Use `--clean` for the transport baseline. Editor plugins and custom mappings
 must be tested separately as application-specific compatibility cases.
 
-With that buffer still focused, run the driver from another terminal or a
-delayed launcher:
+With that buffer still focused, run the guarded file verifier from another
+terminal:
 
 ```bash
-SNIPEXPAND_E2E_EVENT_DELAY_MS=15 \
-  SNIPEXPAND_E2E_EXPANSION_PAUSE_MS=250 \
-  target/debug/examples/e2e_type --compatibility
+tests/compatibility/verify-file.sh
 ```
 
-The driver writes the cases, saves the file, and exits Neovim. Compare the
-result exactly:
-
-```bash
-cmp tests/compatibility/expected.txt "$test_file"
-```
+The verifier guards focus while the target exists, allows the expected window
+closure after the driver sends `:wq`, and compares the saved file byte-for-byte.
 
 Restore the normal user service after the isolated daemon exits.
+
+### Chromium
+
+Close every normal Chromium window, then start the dedicated compatibility
+profile:
+
+```bash
+tests/compatibility/launch-chromium.sh
+```
+
+This persistent profile lives below `~/.cache/snipexpand` by default and loads
+the local target with extensions disabled. It is separate from the everyday
+profile and does not install 1Password. The launcher warns when another
+Chromium process is running because a 1Password prompt could come from that
+browser instead.
+
+First leave the browser untouched long enough to confirm that no 1Password
+window appears. This launch-only stage distinguishes browser integration from
+keyboard injection. Run the typing verifier only as a separate second stage:
+
+```bash
+tests/compatibility/verify-clipboard.sh
+```
+
+### Other graphical applications
+
+Open one isolated launch-only target:
+
+```bash
+tests/compatibility/launch-target.sh zed
+tests/compatibility/launch-target.sh electron
+tests/compatibility/launch-target.sh gtk
+tests/compatibility/launch-target.sh qt
+```
+
+The launcher uses a separate profile for Zed and Electron, Zenity's GTK 4 text
+view, and the local QML target. It never starts the typing verifier. After the
+target is stable, focus its empty text area and run the clipboard verifier as a
+separate step.
+
+The verifier runs the same cases, selects the target text, copies it, and
+compares the clipboard byte-for-byte with `expected.txt`. `target.html` is the
+browser and Electron target; `target.qml` is the Qt target. Do not run the
+driver when another window can steal focus. The verifier records the target's
+Hyprland address and aborts immediately if focus moves to another window.
+The verification copy replaces the current clipboard selection, so preserve
+anything important before running it.
 
 ## Application matrix
 
@@ -62,19 +102,61 @@ Use the same fixture for each target application. Record the application
 version, toolkit, active injection backend, event delay, result, and any timing
 override needed.
 
+Current Omarchy test environment: Omarchy 4.0.0-1, Hyprland 0.56.2,
+`wtype` 0.4-2, and `wl-clipboard` 2.3.0.
+
 | Application family | Initial targets | Result |
 | --- | --- | --- |
-| Terminal editor | Neovim `--clean` in Foot | Pass: Wayland, 15 ms events, 50 ms post-expansion pause |
+| Terminal editor | Neovim 0.12.4 `--clean` in Foot 1.27.0 | Pass: Wayland, 15 ms events, 50 ms and 250 ms post-expansion pauses. Two byte-exact runs passed; the second exposed and corrected a guard false positive caused by the expected `:wq` window closure |
 | Configured editor | Personal Neovim profile in Foot | Investigate: first Enter after multiline replacement is consumed by the editor configuration |
-| Browser | Chromium, Firefox | Pending |
-| Code editor | Zed | Pending |
-| Electron | Chromium-based desktop app | Pending |
-| GTK | Native GTK text editor | Pending |
-| Qt | Native Qt text editor | Pending |
+| Browser | Chromium 151.0.7922.137, Firefox unavailable | Retest required: isolated Chromium previously passed the complete byte-exact fixture with the superseded wtype compose path. The injector-owned replacement is deterministically covered but has not had a guarded live run. Firefox pending |
+| Code editor | Zed 1.14.2 (`zeditor`) | Launch adapter ready; live result pending |
+| Electron | Electron 43.4.0 | Launch adapter ready; live result pending |
+| Signal | Signal Desktop 8.23.0 | Flash-free path passed: `;sm` became 🙂 immediately with no numeric preedit. The journal confirmed Fcitx committed without compose. Full byte-exact fixture still pending |
+| GTK | Zenity 4.2.2 / GTK 4.22.4 | Launch adapter ready; live result pending |
+| Qt | QML Runtime 6.11.1 | Launch adapter ready; live result pending |
 
-Browser and GUI-editor adapters still need a reliable way to extract their
-final text for byte-exact comparison. Do not mark a target as passing based
-only on visual inspection.
+The generic clipboard adapter is available, but the remaining applications
+still require controlled live runs. Do not mark a target as passing based only
+on visual inspection. Two earlier Chromium attempts were invalid because a
+1Password window stole focus. The normal browser with its 1Password extension
+was still running, so the prompt cannot be attributed to the isolated test
+browser. Those attempts remain discarded; the later focus-stable run above is
+the recorded Chromium result.
+
+Chromium 151 converted `🧐` (U+1F9D0) to U+F9D0 when it received the direct
+Wayland text keymap. In `auto`, SnipExpand now asks its optional Fcitx5 addon to
+verify and replace the exact trigger through the focused input context. This
+uses the input method that already owns the seat and sends final UTF-8 without
+numeric preedit. A safe refusal falls back to compose. The opt-in
+`input_method` mode remains available when no other input method owns the seat.
+Stale surrounding text gets one bounded exact retry. A client that never
+supplies surrounding text gets a separate short-lived fallback bound to the
+same Fcitx input context, trigger, and replacement. It forwards the trigger's
+Backspaces and commits final UTF-8 through Fcitx. A mismatch never enables this
+path, and focus, password, selection, and timing guards are checked again.
+
+Compose runs inside the persistent Wayland injector. It resolves the complete
+sequence before sending any input, paces the Ctrl+Shift+U, hexadecimal, and
+Enter transitions, and clears synthetic modifiers even when dispatch fails.
+Compose expansions also use the safer of the general and compose settle
+intervals before deleting the trigger. The Fcitx5 suffix checks, D-Bus result
+classification, compose sequence, modifier selection, and settle selection all
+have deterministic coverage.
+
+The earlier guarded Chromium 151 run passed the complete byte-exact fixture,
+including `🧐`, with no focus change or daemon error. That run exercised the
+superseded short-lived `wtype` implementation. Signal subsequently exposed a
+visible `U+1f642` preedit because it did not provide Fcitx surrounding text.
+That motivated the bridge's guarded same-context fallback. On 2026-09-02,
+Signal 8.23.0 expanded `;sm` to 🙂 immediately with no numeric preedit; the
+daemon journal independently confirmed that Fcitx committed without compose.
+The full byte-exact Signal fixture and isolated Chromium bridge run remain.
+
+The first focus-guarded compose run reached Chromium without focus theft but
+failed before the emoji because the former wtype implementation passed its
+unsupported `-d 0` option. That historical failure is no longer applicable to
+the injector-owned implementation.
 
 ## Unicode hot reload
 

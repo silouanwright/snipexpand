@@ -136,6 +136,35 @@
         ]
       },
       "description": "Personal file/subtree collections. Paths relative to match/; packs/ is excluded. Run check for path and name uniqueness validation."
+    },
+    "non_bmp_input": {
+      "enum": [
+        "auto",
+        "keymap",
+        "compose",
+        "fcitx5",
+        "input_method"
+      ],
+      "default": "auto"
+    },
+    "fcitx_sensitive_hint": {
+      "enum": [
+        "allow",
+        "suppress"
+      ],
+      "default": "allow"
+    },
+    "compose_delay_ms": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 50,
+      "default": 5
+    },
+    "compose_settle_ms": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 100,
+      "default": 10
     }
   },
   "definitions": {
@@ -297,6 +326,59 @@
           ]
         },
         "injection_settle_ms": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 100
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "non_bmp_input": {
+          "anyOf": [
+            {
+              "enum": [
+                "auto",
+                "keymap",
+                "compose",
+                "fcitx5",
+                "input_method"
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "fcitx_sensitive_hint": {
+          "anyOf": [
+            {
+              "enum": [
+                "allow",
+                "suppress"
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "compose_delay_ms": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 50
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "compose_settle_ms": {
           "anyOf": [
             {
               "type": "integer",

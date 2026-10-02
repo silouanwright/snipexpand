@@ -463,3 +463,25 @@ fn reload_cli_reports_daemon_rejection() {
     assert!(!output.status.success());
     assert!(String::from_utf8_lossy(&output.stderr).contains("invalid candidate configuration"));
 }
+
+#[test]
+fn unicode_settings_schema_and_parser_agree_after_integration() {
+    for mode in ["auto", "keymap", "compose", "fcitx5", "input_method"] {
+        for policy in ["allow", "suppress"] {
+            let settings = json!({"non_bmp_input":mode,"fcitx_sensitive_hint":policy,
+                "compose_delay_ms":50,"compose_settle_ms":100,
+                "app_profiles":[{"name":"Browser","filter":{"class":"chromium"},
+                    "non_bmp_input":mode,"fcitx_sensitive_hint":policy,
+                    "compose_delay_ms":0,"compose_settle_ms":0}]});
+            check_case("config", settings, true, true);
+        }
+    }
+    for settings in [
+        json!({"non_bmp_input":"unknown"}),
+        json!({"fcitx_sensitive_hint":"sometimes"}),
+        json!({"compose_delay_ms":51}),
+        json!({"compose_settle_ms":101}),
+    ] {
+        check_case("config", settings, false, false);
+    }
+}

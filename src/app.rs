@@ -10,6 +10,40 @@ pub struct AppInfo {
     pub exec: Option<String>,
 }
 
+impl AppInfo {
+    pub fn uses_chromium_text_input(&self) -> bool {
+        self.class.as_deref().is_some_and(chromium_identifier)
+            || self.exec.as_deref().is_some_and(chromium_identifier)
+            || self.exec.as_deref().is_some_and(electron_executable)
+    }
+}
+
+fn chromium_identifier(value: &str) -> bool {
+    let value = value.to_ascii_lowercase();
+    value == "chromium"
+        || value.contains("/chromium")
+        || value.contains("google-chrome")
+        || value
+            .rsplit('/')
+            .next()
+            .is_some_and(|name| name == "chrome" || name.starts_with("chrome-"))
+}
+
+fn electron_executable(value: &str) -> bool {
+    let Some(parent) = std::path::Path::new(value).parent() else {
+        return false;
+    };
+    [
+        "resources/app.asar",
+        "resources/default_app.asar",
+        "resources/electron.asar",
+        "resources/app",
+        "app.asar",
+    ]
+    .iter()
+    .any(|relative| parent.join(relative).exists())
+}
+
 #[derive(Deserialize)]
 struct HyprlandWindow {
     #[serde(default)]
@@ -90,5 +124,43 @@ mod tests {
     fn empty_strings_become_missing_properties() {
         assert_eq!(nonempty(String::new()), None);
         assert_eq!(nonempty("foot".into()), Some("foot".into()));
+    }
+
+    #[test]
+    fn chromium_apps_are_identified_without_matching_unrelated_names() {
+        assert!(AppInfo {
+            class: Some("chrome-__home_user_target.html-Default".into()),
+            ..Default::default()
+        }
+        .uses_chromium_text_input());
+        assert!(AppInfo {
+            exec: Some("/usr/lib/chromium/chromium".into()),
+            ..Default::default()
+        }
+        .uses_chromium_text_input());
+        assert!(!AppInfo {
+            class: Some("chromium-notes".into()),
+            ..Default::default()
+        }
+        .uses_chromium_text_input());
+    }
+
+    #[test]
+    fn electron_apps_are_identified_from_their_runtime_artifacts() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let resources = dir.path().join("resources");
+        std::fs::create_dir(&resources).unwrap();
+        std::fs::write(resources.join("app.asar"), []).unwrap();
+
+        assert!(AppInfo {
+            exec: Some(dir.path().join("signal-desktop").display().to_string()),
+            ..Default::default()
+        }
+        .uses_chromium_text_input());
+        assert!(!AppInfo {
+            exec: Some(dir.path().join("bin/editor").display().to_string()),
+            ..Default::default()
+        }
+        .uses_chromium_text_input());
     }
 }

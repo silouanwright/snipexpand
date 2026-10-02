@@ -3,6 +3,7 @@ mod config;
 mod daemon;
 mod date;
 mod expander;
+mod fcitx5;
 mod groups;
 mod injector;
 mod ipc;
@@ -457,7 +458,7 @@ fn init_config() -> anyhow::Result<()> {
     let matches = match_dir.join("base.yml");
     write_new(
         &settings,
-        "trigger_mode: space\nterminators: [space]\ninjection_backend: auto\ninjection_delay_ms: 1\nwayland_injection_delay_ms: 0\nuinput_injection_delay_ms: 1\ninjection_settle_ms: 10\n",
+        "trigger_mode: space\nterminators: [space]\ninjection_backend: auto\nnon_bmp_input: auto\nfcitx_sensitive_hint: allow\ninjection_delay_ms: 1\nwayland_injection_delay_ms: 0\nuinput_injection_delay_ms: 1\ninjection_settle_ms: 10\ncompose_delay_ms: 5\ncompose_settle_ms: 10\n",
     )?;
     write_new(
         &matches,
@@ -478,7 +479,7 @@ fn ensure_config() -> anyhow::Result<()> {
     if !settings.exists() {
         write_new(
             &settings,
-            "trigger_mode: space\nterminators: [space]\ninjection_backend: auto\ninjection_delay_ms: 1\nwayland_injection_delay_ms: 0\nuinput_injection_delay_ms: 1\ninjection_settle_ms: 10\n",
+            "trigger_mode: space\nterminators: [space]\ninjection_backend: auto\nnon_bmp_input: auto\nfcitx_sensitive_hint: allow\ninjection_delay_ms: 1\nwayland_injection_delay_ms: 0\nuinput_injection_delay_ms: 1\ninjection_settle_ms: 10\ncompose_delay_ms: 5\ncompose_settle_ms: 10\n",
         )?;
     }
 
@@ -581,6 +582,8 @@ struct DoctorCheck {
     id: &'static str,
     label: &'static str,
     ok: bool,
+    #[serde(default, skip_serializing_if = "is_false")]
+    optional: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     detail: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -633,9 +636,23 @@ fn doctor(json: bool) {
             daemon_result.err().map(|error| error.to_string()),
             "Run snipexpand install or restart the snipexpand user service",
         ),
+        doctor_optional_check(
+            "fcitx5_bridge_installed",
+            "Fcitx5 flash-free Unicode bridge installed",
+            fcitx5::addon_installed(),
+            None,
+            "Run snipexpand install to add the optional Chromium/Electron bridge",
+        ),
+        doctor_optional_check(
+            "fcitx5_bridge_loaded",
+            "Fcitx5 flash-free Unicode bridge loaded",
+            fcitx5::bridge_is_loaded(),
+            None,
+            "Run snipexpand install; if Fcitx5 cannot refresh the addon, start a new session",
+        ),
     ];
     let report = DoctorReport {
-        ok: checks.iter().all(|check| check.ok),
+        ok: checks.iter().all(|check| check.ok || check.optional),
         checks,
     };
 
@@ -646,7 +663,14 @@ fn doctor(json: bool) {
         );
     } else {
         for check in &report.checks {
-            println!("{} {}", if check.ok { "✓" } else { "✗" }, check.label);
+            let marker = if check.ok {
+                "✓"
+            } else if check.optional {
+                "○"
+            } else {
+                "✗"
+            };
+            println!("{marker} {}", check.label);
             if let Some(detail) = &check.detail {
                 println!("  {detail}");
             }
@@ -671,9 +695,22 @@ fn doctor_check(
         id,
         label,
         ok,
+        optional: false,
         detail: (!ok).then_some(detail).flatten(),
         fix: (!ok).then_some(fix),
     }
+}
+
+fn doctor_optional_check(
+    id: &'static str,
+    label: &'static str,
+    ok: bool,
+    detail: Option<String>,
+    fix: &'static str,
+) -> DoctorCheck {
+    let mut check = doctor_check(id, label, ok, detail, fix);
+    check.optional = true;
+    check
 }
 
 fn command_exists(name: &str) -> bool {
@@ -751,6 +788,23 @@ fn daemon_status() -> anyhow::Result<ipc::DaemonStatus> {
 }
 
 fn install_service() -> anyhow::Result<()> {
+    match fcitx5::install_addon() {
+        Ok(fcitx5::AddonInstallResult::Installed { loaded: true }) => {
+            println!("Installed and loaded the Fcitx5 flash-free Unicode bridge.");
+        }
+        Ok(fcitx5::AddonInstallResult::Installed { loaded: false }) => {
+            println!(
+                "Installed the Fcitx5 Unicode bridge. It will load with the next Fcitx5 session."
+            );
+        }
+        Ok(fcitx5::AddonInstallResult::Unavailable(reason)) => {
+            println!("Optional Fcitx5 Unicode bridge unavailable: {reason}");
+        }
+        Err(error) => {
+            println!("Could not install the optional Fcitx5 Unicode bridge: {error}");
+        }
+    }
+
     let binary = std::env::current_exe()?;
     let service = service_definition(&binary);
     let service_path = service_path()?;
@@ -929,6 +983,7 @@ mod tests {
     fn doctor_check_only_exposes_failure_guidance_when_needed() {
         let passing = doctor_check("daemon", "daemon", true, None, "Restart it");
         assert!(passing.fix.is_none());
+        assert!(!passing.optional);
 
         let failing = doctor_check(
             "daemon",
@@ -939,6 +994,16 @@ mod tests {
         );
         assert_eq!(failing.detail.as_deref(), Some("not reachable"));
         assert_eq!(failing.fix, Some("Restart it"));
+        assert!(!failing.optional);
+
+        let optional = doctor_optional_check(
+            "bridge",
+            "bridge",
+            false,
+            Some("not installed".to_string()),
+            "Install it",
+        );
+        assert!(optional.optional);
     }
 
     #[test]

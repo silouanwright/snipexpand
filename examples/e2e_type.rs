@@ -291,6 +291,14 @@ fn type_trigger(device: &mut VirtualDevice, trigger: &str) -> anyhow::Result<()>
 }
 
 fn run_compatibility_suite() -> anyhow::Result<()> {
+    run_compatibility_cases(false)
+}
+
+fn run_compatibility_clipboard_suite() -> anyhow::Result<()> {
+    run_compatibility_cases(true)
+}
+
+fn run_compatibility_cases(copy_result: bool) -> anyhow::Result<()> {
     let mut device = create_device()?;
     std::thread::sleep(Duration::from_millis(1500));
 
@@ -315,11 +323,18 @@ fn run_compatibility_suite() -> anyhow::Result<()> {
     }
 
     std::thread::sleep(Duration::from_millis(500));
-    emit_key(&mut device, 1)?; // Escape
-    for character in ":wq".chars() {
-        emit_character(&mut device, character)?;
+    if copy_result {
+        emit_state_with_delay(&mut device, 29, 1, event_delay())?; // Ctrl down
+        emit_key(&mut device, 30)?; // A
+        emit_key(&mut device, 46)?; // C
+        emit_state_with_delay(&mut device, 29, 0, event_delay())?; // Ctrl up
+    } else {
+        emit_key(&mut device, 1)?; // Escape
+        for character in ":wq".chars() {
+            emit_character(&mut device, character)?;
+        }
+        emit_key(&mut device, 28)?; // Enter
     }
-    emit_key(&mut device, 28)?; // Enter
     std::thread::sleep(Duration::from_millis(500));
     Ok(())
 }
@@ -349,6 +364,9 @@ fn main() -> anyhow::Result<()> {
     }
     if trigger == "--compatibility" {
         return run_compatibility_suite();
+    }
+    if trigger == "--compatibility-copy" {
+        return run_compatibility_clipboard_suite();
     }
     if trigger == "--compatibility-multiline" {
         return run_multiline_probe();

@@ -33,7 +33,19 @@ jobs:
       - name: Install system dependencies
         run: |
           sudo apt-get update -q
-          sudo apt-get install -y libxkbcommon-dev libwayland-dev
+          sudo apt-get install -y \
+            cmake \
+            fcitx5-modules-dev \
+            libfcitx5core-dev \
+            libxkbcommon-dev \
+            libwayland-dev \
+            pkg-config
+
+      - name: Build and test Fcitx5 bridge
+        run: |
+          cmake -S fcitx5-addon -B target/fcitx5-addon
+          cmake --build target/fcitx5-addon
+          ctest --test-dir target/fcitx5-addon --output-on-failure
 
       - name: Check formatting
         run: cargo fmt --check

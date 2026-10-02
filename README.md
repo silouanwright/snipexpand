@@ -31,6 +31,7 @@ Fast, config-based text expansion for Linux and Wayland. **First-class support f
 - Git-published snippet packs with pinned revisions and explicit updates
 - Direct installation of strictly compatible Espanso packs
 - Persistent Wayland injection with a `uinput` fallback
+- Flash-free supplementary Unicode in Chromium and Electron through Fcitx5
 - Strict validation and diagnostics
 
 ## Why SnipExpand?
@@ -58,6 +59,12 @@ Run SnipExpand from a local Wayland desktop session with:
 - Read access to keyboard devices under `/dev/input/` (see setup below)
 - `wtype` for the Unicode fallback path
 
+On systems using Fcitx5, `snipexpand install` also builds a small per-user
+bridge for flash-free emoji and other Unicode above U+FFFF in Chromium and
+Electron. This optional bridge uses `busctl` at runtime and needs `c++`,
+`pkg-config`, and the Fcitx5 development files at installation time. SnipExpand
+keeps working through its compose fallback when they are unavailable.
+
 ## Install
 
 Install from crates.io:
@@ -81,8 +88,9 @@ administrator authentication to install a keyboard-only udev rule. The rule
 grants keyboard access to the active local session and applies again after a
 reboot or keyboard reconnect. It does not add your user to the `input` group.
 
-Setup creates missing starter files without overwriting your config, then
-starts and enables the user service. It checks that a keyboard can actually be read before
+Setup creates missing starter files without overwriting your config, installs
+the optional Fcitx5 bridge when its build tools are available, and starts and
+enables the user service. It checks that a keyboard can actually be read before
 reporting success. If your system already provides keyboard access, you can
 use `snipexpand install` without the flag.
 
@@ -316,11 +324,25 @@ regex_max_buffer: 256
 # Prefer native Wayland injection and fall back to uinput.
 injection_backend: auto    # auto | wayland | uinput
 
+# Auto uses Fcitx5 for Chromium/Electron when available, then compose fallback.
+non_bmp_input: auto         # auto | keymap | fcitx5 | compose | input_method
+
+# fcitx5 uses the installed bridge explicitly. input_method instead asks
+# SnipExpand to own the exclusive Wayland input-method-v2 seat itself.
+
+# Allow ordinary fields carrying Fcitx's privacy/no-prediction hint.
+# Actual password fields are always blocked.
+fcitx_sensitive_hint: allow # allow | suppress
+
 # Tune these only if an application drops or reorders characters.
 injection_delay_ms: 1
 wayland_injection_delay_ms: 0
 uinput_injection_delay_ms: 1
 injection_settle_ms: 10
+
+# Chromium/Electron Unicode compose timing. This does not slow normal text.
+compose_delay_ms: 5
+compose_settle_ms: 10  # protects trigger deletion and compose transitions
 
 # Backspace immediately after a simple expansion to restore its trigger.
 undo_enabled: true         # true | false
@@ -338,6 +360,10 @@ app_profiles:
     include_match_files: [browser.yml]
     trigger_mode: space
     injection_delay_ms: 1
+    # non_bmp_input: compose # override for unusual application packaging
+    # fcitx_sensitive_hint: suppress
+    # compose_delay_ms: 5
+    # compose_settle_ms: 10
 ```
 
 Run `snipexpand detect` while an application is focused to find the title,
@@ -432,13 +458,30 @@ by `list --json`.
   unsupported.
 - Application exclusions operate at the application level. Wayland does not
   expose a browser's focused field type, so SnipExpand cannot automatically
-  identify password fields inside an allowed browser.
+  identify password fields inside an allowed browser. The optional Fcitx5
+  bridge does refuse direct commits when the input method marks a field as a
+  password field. Fcitx's broader `Sensitive` hint is allowed by default
+  because private-message composers such as Signal use it for ordinary text.
+  Set `fcitx_sensitive_hint: suppress` globally or in an application profile
+  for a stricter policy. This does not stop global keyboard-event reading.
+- `non_bmp_input: input_method` requires Wayland input-method-v2, an active
+  text-input-v3 client that reports surrounding text, and exclusive ownership
+  of the seat's input-method slot. It falls back to the keyboard path when
+  unavailable. Omarchy runs Fcitx5 by default, so keep `auto` unless Fcitx5 is
+  intentionally absent.
+- The optional Fcitx5 bridge verifies the exact suffix when the focused
+  application supplies surrounding text. For applications such as Signal that
+  do not, it allows one short-lived, same-field fallback that forwards the
+  trigger deletion and commits the final UTF-8 text through Fcitx5. If either
+  check is refused, `auto` falls back to Unicode compose, which may briefly
+  show its `U+...` preedit.
 - SnipExpand reads global keyboard events, including sensitive input.
   Application exclusions stop expansion but do not stop the daemon from
   receiving those events. Install only binaries you trust.
 
-SnipExpand does not execute snippets, access the clipboard, or contact online
-services.
+The daemon does not execute snippet content, access the clipboard, or make
+network requests. Pack-management commands contact only the Git remotes you
+explicitly request.
 
 See the [compatibility matrix](docs/compatibility.md) for the complete supported
 configuration surface.

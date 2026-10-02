@@ -4,9 +4,10 @@ use std::sync::{Arc, Mutex};
 use tokio::io::AsyncWriteExt;
 use tokio::signal::unix::{signal, SignalKind};
 
-use crate::config::Config;
+use crate::config::{Config, FcitxSensitiveHint, NonBmpInput};
 use crate::expander::Expander;
-use crate::injector::Injector;
+use crate::fcitx5::DirectCommitResult;
+use crate::injector::{ComposeTiming, Injector, InjectorOptions};
 use crate::ipc::{IpcCmd, IpcServer};
 use crate::keyboard::{KeyboardEvent, KeyboardStream};
 
@@ -114,14 +115,19 @@ pub async fn run(config: Config) -> Result<()> {
     log_config_warnings(&config);
 
     // Spawn Wayland thread (blocks until keymap received)
-    let injector = Injector::spawn(
-        config.settings.injection_backend,
-        config.settings.injection_delay_ms,
-        config.settings.wayland_injection_delay_ms,
-        config.settings.uinput_injection_delay_ms,
-        config.settings.injection_settle_ms,
-        wayland_text_characters(&config),
-    )?;
+    let injector = Injector::spawn(InjectorOptions {
+        backend: config.settings.injection_backend,
+        enable_input_method: config.settings.requests_input_method(),
+        delay_ms: config.settings.injection_delay_ms,
+        wayland_delay_ms: config.settings.wayland_injection_delay_ms,
+        uinput_delay_ms: config.settings.uinput_injection_delay_ms,
+        settle_ms: config.settings.injection_settle_ms,
+        compose_timing: ComposeTiming {
+            delay_ms: config.settings.compose_delay_ms,
+            settle_ms: config.settings.compose_settle_ms,
+        },
+        wayland_text_chars: wayland_text_characters(&config),
+    })?;
     tracing::info!("Injection keyboard ready");
 
     // Open evdev keyboard stream
@@ -517,8 +523,103 @@ fn inject_expansion(
             ),
         }
     }
-    injector.backspace(expansion.delete_count);
-    type_with_fallback(injector, &expansion.text);
+    let strategy = non_bmp_strategy(config, &expansion.text);
+    let mut direct_commit_attempted = false;
+    let compose_non_bmp = match strategy {
+        NonBmpStrategy::Keymap => false,
+        NonBmpStrategy::Compose => true,
+        NonBmpStrategy::Fcitx5 {
+            fallback_compose,
+            allow_sensitive_hint,
+        } => {
+            direct_commit_attempted = true;
+            match injector.replace_with_fcitx5(
+                &expansion.undo_text,
+                &expansion.text,
+                allow_sensitive_hint,
+            ) {
+                DirectCommitResult::Committed => {
+                    tracing::info!(
+                        "Fcitx5 committed the expansion without a Unicode compose fallback"
+                    );
+                    injector.position_cursor(&expansion.text, expansion.cursor_back);
+                    if let Err(error) = injector.flush() {
+                        tracing::error!("Could not finish Fcitx5 expansion injection: {}", error);
+                    }
+                    let undo_enabled = config.lock().unwrap().settings.undo_enabled;
+                    return (undo_enabled
+                        && expansion.cursor_back == 0
+                        && !expansion.text.contains('\n'))
+                    .then(|| Undo {
+                        replacement_len: expansion.text.chars().count(),
+                        original: expansion.undo_text,
+                    });
+                }
+                DirectCommitResult::NotCommitted(reason) => {
+                    tracing::debug!(
+                        "Fcitx5 direct commit unavailable ({reason}); using the keyboard fallback"
+                    );
+                }
+                DirectCommitResult::Suppressed(reason) => {
+                    tracing::info!("Expansion suppressed: {reason}");
+                    return None;
+                }
+                DirectCommitResult::Indeterminate(reason) => {
+                    tracing::error!(
+                        "{reason}; refusing a keyboard retry because the target may already contain the replacement"
+                    );
+                    return None;
+                }
+            }
+            fallback_compose
+        }
+        NonBmpStrategy::InputMethod { fallback_compose } => {
+            direct_commit_attempted = true;
+            match injector.replace_with_input_method(&expansion.undo_text, &expansion.text) {
+                DirectCommitResult::Committed => {
+                    injector.position_cursor(&expansion.text, expansion.cursor_back);
+                    if let Err(error) = injector.flush() {
+                        tracing::error!(
+                            "Could not finish input-method-v2 expansion injection: {}",
+                            error
+                        );
+                    }
+                    let undo_enabled = config.lock().unwrap().settings.undo_enabled;
+                    return (undo_enabled
+                        && expansion.cursor_back == 0
+                        && !expansion.text.contains('\n'))
+                    .then(|| Undo {
+                        replacement_len: expansion.text.chars().count(),
+                        original: expansion.undo_text,
+                    });
+                }
+                DirectCommitResult::NotCommitted(reason) => {
+                    tracing::debug!(
+                        "input-method-v2 direct commit unavailable ({reason}); using the keyboard fallback"
+                    );
+                }
+                DirectCommitResult::Suppressed(reason) => {
+                    tracing::info!("Expansion suppressed: {reason}");
+                    return None;
+                }
+                DirectCommitResult::Indeterminate(reason) => {
+                    tracing::error!(
+                        "{reason}; refusing a keyboard retry because the target may already contain the replacement"
+                    );
+                    return None;
+                }
+            }
+            fallback_compose
+        }
+    };
+    if direct_commit_attempted {
+        injector.backspace_without_settle(expansion.delete_count);
+    } else if compose_non_bmp {
+        injector.backspace_for_compose(expansion.delete_count);
+    } else {
+        injector.backspace(expansion.delete_count);
+    }
+    type_with_fallback(injector, &expansion.text, compose_non_bmp);
     injector.position_cursor(&expansion.text, expansion.cursor_back);
     if let Err(error) = injector.flush() {
         tracing::error!("Could not finish expansion injection: {}", error);
@@ -530,10 +631,17 @@ fn inject_expansion(
     })
 }
 
-fn type_with_fallback(injector: &Injector, text: &str) {
+fn type_with_fallback(injector: &Injector, text: &str, compose_non_bmp: bool) {
     if injector.backend() == "wayland" {
-        match injector.type_wayland_text(text) {
+        match injector.type_wayland_text(text, compose_non_bmp) {
             Ok(()) => return,
+            Err(error) if compose_non_bmp => {
+                tracing::error!(
+                    "Wayland text injection failed after entering compose mode; refusing an unsafe retry: {}",
+                    error
+                );
+                return;
+            }
             Err(error) => tracing::warn!("Persistent Wayland text unavailable: {}", error),
         }
     }
@@ -541,6 +649,64 @@ fn type_with_fallback(injector: &Injector, text: &str) {
         injector.type_text(text);
     } else if let Err(error) = injector.type_unicode(text) {
         tracing::error!("Unicode fallback failed: {}", error);
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum NonBmpStrategy {
+    Keymap,
+    Compose,
+    Fcitx5 {
+        fallback_compose: bool,
+        allow_sensitive_hint: bool,
+    },
+    InputMethod {
+        fallback_compose: bool,
+    },
+}
+
+fn non_bmp_strategy(config: &Arc<Mutex<Config>>, text: &str) -> NonBmpStrategy {
+    if !text.chars().any(|character| character as u32 > 0xffff) {
+        return NonBmpStrategy::Keymap;
+    }
+    let app = crate::app::detect().ok();
+    let cfg = config.lock().unwrap();
+    let profile = app
+        .as_ref()
+        .and_then(|app| cfg.settings.profile_index(app))
+        .and_then(|index| cfg.settings.app_profiles.get(index));
+    let mode = profile
+        .and_then(|profile| profile.non_bmp_input)
+        .unwrap_or(cfg.settings.non_bmp_input);
+    let sensitive_hint = profile
+        .and_then(|profile| profile.fcitx_sensitive_hint)
+        .unwrap_or(cfg.settings.fcitx_sensitive_hint);
+    strategy_for_app(mode, sensitive_hint, app.as_ref())
+}
+
+fn strategy_for_app(
+    mode: NonBmpInput,
+    sensitive_hint: FcitxSensitiveHint,
+    app: Option<&crate::app::AppInfo>,
+) -> NonBmpStrategy {
+    let fcitx5 = || NonBmpStrategy::Fcitx5 {
+        fallback_compose: app.is_some_and(crate::app::AppInfo::uses_chromium_text_input),
+        allow_sensitive_hint: sensitive_hint == FcitxSensitiveHint::Allow,
+    };
+    match mode {
+        NonBmpInput::Keymap => NonBmpStrategy::Keymap,
+        NonBmpInput::Compose => NonBmpStrategy::Compose,
+        NonBmpInput::Fcitx5 => fcitx5(),
+        NonBmpInput::InputMethod => NonBmpStrategy::InputMethod {
+            fallback_compose: app.is_some_and(crate::app::AppInfo::uses_chromium_text_input),
+        },
+        NonBmpInput::Auto => {
+            if app.is_some_and(crate::app::AppInfo::uses_chromium_text_input) {
+                fcitx5()
+            } else {
+                NonBmpStrategy::Keymap
+            }
+        }
     }
 }
 
@@ -561,6 +727,7 @@ fn wayland_text_characters(config: &Config) -> String {
 
 struct ConfigEffects {
     backend_changed: bool,
+    input_method_changed: bool,
     text_characters: Option<String>,
 }
 
@@ -582,6 +749,8 @@ fn install_matching_config(
     input: &mut InputState,
 ) -> ConfigEffects {
     let backend_changed = new_cfg.settings.injection_backend != current.settings.injection_backend;
+    let input_method_changed =
+        new_cfg.settings.requests_input_method() != current.settings.requests_input_method();
     let characters = wayland_text_characters(&new_cfg);
     let changed_characters = (characters != wayland_text_characters(current)).then_some(characters);
     expander.update_configured(
@@ -598,6 +767,7 @@ fn install_matching_config(
     input.last_profile_check = None;
     ConfigEffects {
         backend_changed,
+        input_method_changed,
         text_characters: changed_characters,
     }
 }
@@ -618,6 +788,13 @@ fn apply_config_effects(current: &Config, injector: &Injector, effects: ConfigEf
     if effects.backend_changed {
         tracing::warn!("injection_backend changes require a daemon restart");
     }
+    if effects.input_method_changed {
+        tracing::warn!("input-method-v2 enablement changes require a daemon restart");
+    }
+    injector.set_compose_timing(
+        current.settings.compose_delay_ms,
+        current.settings.compose_settle_ms,
+    );
     injector.set_delay_ms(current.settings.injection_delay_for(injector.backend()));
     injector.set_settle_ms(current.settings.injection_settle_ms);
     if let Some(characters) = effects.text_characters {
@@ -726,6 +903,14 @@ fn refresh_app_profile(
         selected
             .and_then(|profile| profile.injection_settle_ms)
             .unwrap_or(cfg.settings.injection_settle_ms),
+    );
+    injector.set_compose_timing(
+        selected
+            .and_then(|profile| profile.compose_delay_ms)
+            .unwrap_or(cfg.settings.compose_delay_ms),
+        selected
+            .and_then(|profile| profile.compose_settle_ms)
+            .unwrap_or(cfg.settings.compose_settle_ms),
     );
     input.active_profile = profile;
     input.profile_initialized = true;
@@ -968,6 +1153,95 @@ mod tests {
         let characters = wayland_text_characters(&config);
         assert!(characters.contains('猫'));
         assert!(characters.contains('🦀'));
+    }
+
+    #[test]
+    fn non_bmp_strategy_is_app_aware_and_can_be_overridden() {
+        let chromium = crate::app::AppInfo {
+            exec: Some("/usr/lib/chromium/chromium".into()),
+            ..Default::default()
+        };
+        let terminal = crate::app::AppInfo {
+            class: Some("foot".into()),
+            ..Default::default()
+        };
+        assert_eq!(
+            strategy_for_app(
+                NonBmpInput::Auto,
+                FcitxSensitiveHint::Allow,
+                Some(&chromium)
+            ),
+            NonBmpStrategy::Fcitx5 {
+                fallback_compose: true,
+                allow_sensitive_hint: true
+            }
+        );
+        assert_eq!(
+            strategy_for_app(
+                NonBmpInput::Auto,
+                FcitxSensitiveHint::Allow,
+                Some(&terminal)
+            ),
+            NonBmpStrategy::Keymap
+        );
+        assert_eq!(
+            strategy_for_app(
+                NonBmpInput::Keymap,
+                FcitxSensitiveHint::Allow,
+                Some(&chromium)
+            ),
+            NonBmpStrategy::Keymap
+        );
+        assert_eq!(
+            strategy_for_app(
+                NonBmpInput::Compose,
+                FcitxSensitiveHint::Allow,
+                Some(&terminal)
+            ),
+            NonBmpStrategy::Compose
+        );
+        assert_eq!(
+            strategy_for_app(
+                NonBmpInput::Fcitx5,
+                FcitxSensitiveHint::Allow,
+                Some(&chromium)
+            ),
+            NonBmpStrategy::Fcitx5 {
+                fallback_compose: true,
+                allow_sensitive_hint: true
+            }
+        );
+        assert_eq!(
+            strategy_for_app(
+                NonBmpInput::Fcitx5,
+                FcitxSensitiveHint::Suppress,
+                Some(&terminal)
+            ),
+            NonBmpStrategy::Fcitx5 {
+                fallback_compose: false,
+                allow_sensitive_hint: false
+            }
+        );
+        assert_eq!(
+            strategy_for_app(
+                NonBmpInput::InputMethod,
+                FcitxSensitiveHint::Allow,
+                Some(&chromium)
+            ),
+            NonBmpStrategy::InputMethod {
+                fallback_compose: true
+            }
+        );
+        assert_eq!(
+            strategy_for_app(
+                NonBmpInput::InputMethod,
+                FcitxSensitiveHint::Suppress,
+                Some(&terminal)
+            ),
+            NonBmpStrategy::InputMethod {
+                fallback_compose: false
+            }
+        );
     }
 
     #[test]
