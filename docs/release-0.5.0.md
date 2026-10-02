@@ -27,8 +27,9 @@ model tests, and a real Quickshell Process test for group changes, refresh,
 and error recovery. Light/dark native group views were rendered and inspected,
 as were loading, empty, error, and unsupported-version states. The installed
 shell was restarted after updates settled to discard a confirmed stale panel;
-its IPC target responds, but the refreshed view still needs its final visual
-and keyboard check.
+the refreshed installed panel now displays Groups and passes Tab/Space navigation
+to its empty state and Escape navigation back and out. Real group mutations
+are covered by the Quickshell Process test.
 
 [Ubuntu CI passed](https://github.com/silouanwright/snipexpand/actions/runs/36972172981)
 for daemon commit `c5d3682`, including the C++ bridge and all Rust tests. Package
@@ -47,7 +48,7 @@ focused window and restored the normal service afterward.
 | Chromium 152.0.7977.82 | Full byte-exact fixture passed; Fcitx direct commit confirmed in daemon log |
 | Electron 43.6.0 | Full byte-exact fixture passed; Fcitx direct commit confirmed in daemon log |
 | Neovim 0.12.5 clean in Foot 1.28.0 | Full byte-exact file fixture passed |
-| Signal 8.26.0 | Final policy smoke pending; no message sent |
+| Signal 8.26.0 | Non-BMP expansion passed in an unsent Note to Self draft with both `allow` and `suppress`; Fcitx direct commit confirmed; draft cleared |
 | Firefox / Zed | Not installed; untested |
 
 The full fixture covers ASCII punctuation, non-Latin and non-BMP Unicode,
@@ -55,6 +56,11 @@ multiline replacement, cursor placement, undo, and 20 consecutive expansions.
 Two launch-only attempts stopped before input while adapting the harness to
 Hyprland's Lua dispatcher and asynchronous focus change. Those attempts are
 not compatibility results.
+
+Signal committed the emoji under both policies: its composer did not trigger
+the bridge's sensitive-hint suppression branch. This verifies Signal delivery
+under both settings, but does not demonstrate live sensitive-field blocking;
+that guard has deterministic C++ coverage. No message was sent.
 
 The v0.5.0 candidate is installed locally and doctor reports keyboard access,
 service readiness, and the matching Fcitx bridge loaded. Publishing is pending.

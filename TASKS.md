@@ -11,9 +11,10 @@ bottom unless user feedback provides a stronger signal.
 - [x] Pass byte-exact Chromium, Electron, GTK, Qt, and clean Neovim delivery tests.
 - [x] Install the candidate daemon/bridge/plugin and preserve rollback backups.
 - [x] Push daemon and plugin changes to main.
-- [ ] Complete the final Signal allow/suppress smoke test in an unsent draft.
-  The focus guard stopped before input; a desktop timing choice is pending.
-- [ ] Verify the refreshed installed plugin view and keyboard controls.
+- [x] Complete the final Signal allow/suppress smoke test in an unsent draft.
+  Both settings delivered the emoji; this composer did not trigger the sensitive
+  hint guard. Drafts were cleared and the normal service restored.
+- [x] Verify the refreshed installed plugin view and keyboard controls.
 - [ ] Tag and publish the daemon and plugin, verify both release artifacts and
   crates.io publication, and record final delivery evidence.
 
@@ -70,8 +71,8 @@ These tasks should come before adding major expansion features.
   - [ ] Finish application-aware non-BMP input validation. Chromium and Electron
     use the optional Fcitx5 direct-commit bridge with a paced compose fallback;
     terminal applications retain direct modifier-free Wayland keymaps. Current
-    Chromium/Electron byte-exact tests pass. Signal's final allow/suppress
-    policy smoke remains pending. Sequence, modifier cleanup, retry policy,
+    Chromium/Electron byte-exact tests pass. Signal delivery passed under both allow/suppress
+    settings; its composer did not exercise sensitive-hint blocking. Sequence, modifier cleanup, retry policy,
     and timing configuration have deterministic coverage.
     - [x] Add an explicit input-method-v2 mode for direct UTF-8 commit when the
       focused client supports text-input-v3 and no other input method owns the
