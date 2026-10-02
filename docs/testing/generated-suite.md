@@ -79,3 +79,25 @@ The branching evaluation regression and graph smoke suite also pass under
 `ulimit -v 2097152` (2 GiB virtual memory) and a 30-second `timeout` per command.
 After echo: 107 tests passed; Clippy with warnings denied, formatting, and CLI
 help passed. Filesystem-failure coverage and named groups remain outstanding.
+
+## Filesystem failures and reloads
+
+Controlled rename failures reproduced a pack-update bug: if moving the installed
+repository to its backup failed after moving the active mirror, the mirror was
+not restored. The transaction now rolls back every completed move after failures
+at each rename or partial application. Tests inject a second rollback failure to
+verify that originals remain in named recovery paths and a retry refuses to
+overwrite them. Existing CLI tests verify successful updates, disabled installs,
+and rejection of invalid pack contents. This covers operation failures, not
+power-loss durability or simultaneous pack-manager processes.
+
+The daemon reload state transition is now testable without a keyboard/injector.
+Invalid YAML and filesystem read failures retain the last valid configuration.
+A successful reload cancels buffered input, undo, and queued expansions; a
+regression demonstrated that an old queued expansion previously survived.
+IPC reload returns errors to the caller, and the CLI reads the response instead
+of reporting success immediately. A local mock-socket integration test checks
+that rejection is visible to the caller. No real daemon or config was used.
+
+After rollback/reload changes: 111 tests passed (90 unit, 15 authoring CLI,
+6 pack CLI), Clippy with warnings denied, formatting, and CLI help passed.

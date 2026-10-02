@@ -259,15 +259,20 @@ pub async fn run(config: Config) -> Result<()> {
 
             Some(_) = watch_rx.recv() => {
                 tracing::info!("Config changed, reloading");
-                reload_config(&config, &mut expander, &injector, &mut input);
+                if let Err(error) = reload_config(&config, &mut expander, &injector, &mut input) {
+                    tracing::warn!("Failed to reload config: {error:#}");
+                }
             }
 
             cmd = ipc_server.accept() => {
                 match cmd {
                     Ok((IpcCmd::Reload, mut stream)) => {
                         tracing::info!("Reload requested via IPC");
-                        reload_config(&config, &mut expander, &injector, &mut input);
-                        let _ = stream.write_all(b"ok\n").await;
+                        let response = match reload_config(&config, &mut expander, &injector, &mut input) {
+                            Ok(()) => "ok\n".to_string(),
+                            Err(error) => format!("error: {}\n", format!("{error:#}").replace(['\r', '\n'], " ")),
+                        };
+                        let _ = stream.write_all(response.as_bytes()).await;
                     }
                     Ok((IpcCmd::Status, mut stream)) => {
                         tracing::info!("Status requested via IPC");
@@ -337,7 +342,9 @@ pub async fn run(config: Config) -> Result<()> {
             }
             _ = sig_usr1.recv() => {
                 tracing::info!("SIGUSR1 received, reloading config");
-                reload_config(&config, &mut expander, &injector, &mut input);
+                if let Err(error) = reload_config(&config, &mut expander, &injector, &mut input) {
+                    tracing::warn!("Failed to reload config: {error:#}");
+                }
             }
         }
     }
@@ -536,48 +543,54 @@ fn wayland_text_characters(config: &Config) -> String {
     text
 }
 
+/// Validate the entire candidate before changing any active matching state.
+fn reload_matching_config(
+    dir: &std::path::Path,
+    current: &mut Config,
+    expander: &mut Expander,
+    input: &mut InputState,
+) -> Result<(bool, Option<String>)> {
+    let new_cfg = Config::load_dir(dir)?;
+    let backend_changed = new_cfg.settings.injection_backend != current.settings.injection_backend;
+    let characters = wayland_text_characters(&new_cfg);
+    let changed_characters = (characters != wayland_text_characters(current)).then_some(characters);
+    expander.update_configured(
+        new_cfg.matches_for_profile(None),
+        new_cfg.settings.trigger_mode,
+        new_cfg.settings.terminator_chars(),
+        new_cfg.settings.word_separator_chars(),
+        new_cfg.settings.regex_max_buffer,
+    );
+    *current = new_cfg;
+    cancel_input_context(expander, input);
+    input.active_profile = None;
+    input.profile_initialized = false;
+    input.last_profile_check = None;
+    Ok((backend_changed, changed_characters))
+}
+
 fn reload_config(
     config: &Arc<Mutex<Config>>,
     expander: &mut Expander,
     injector: &Injector,
     input: &mut InputState,
-) {
-    match Config::load_default() {
-        Ok(new_cfg) => {
-            let (backend_changed, text_characters_changed) = {
-                let current = config.lock().unwrap();
-                (
-                    new_cfg.settings.injection_backend != current.settings.injection_backend,
-                    wayland_text_characters(&new_cfg) != wayland_text_characters(&current),
-                )
-            };
-            if backend_changed {
-                tracing::warn!("injection_backend changes require a daemon restart");
-            }
-            expander.update_configured(
-                new_cfg.matches.clone(),
-                new_cfg.settings.trigger_mode,
-                new_cfg.settings.terminator_chars(),
-                new_cfg.settings.word_separator_chars(),
-                new_cfg.settings.regex_max_buffer,
-            );
-            injector.set_delay_ms(new_cfg.settings.injection_delay_for(injector.backend()));
-            injector.set_settle_ms(new_cfg.settings.injection_settle_ms);
-            if text_characters_changed {
-                if let Err(error) =
-                    injector.refresh_wayland_text_keymap(wayland_text_characters(&new_cfg))
-                {
-                    tracing::warn!("Could not refresh the Wayland Unicode keymap: {}", error);
-                }
-            }
-            *config.lock().unwrap() = new_cfg;
-            input.profile_initialized = false;
-            input.last_profile_check = None;
-            log_config_warnings(&config.lock().unwrap());
-            tracing::info!("Config reloaded");
-        }
-        Err(e) => tracing::warn!("Failed to reload config: {}", e),
+) -> Result<()> {
+    let mut current = config.lock().unwrap();
+    let (backend_changed, changed_characters) =
+        reload_matching_config(&Config::dir(), &mut current, expander, input)?;
+    if backend_changed {
+        tracing::warn!("injection_backend changes require a daemon restart");
     }
+    injector.set_delay_ms(current.settings.injection_delay_for(injector.backend()));
+    injector.set_settle_ms(current.settings.injection_settle_ms);
+    if let Some(characters) = changed_characters {
+        if let Err(error) = injector.refresh_wayland_text_keymap(characters) {
+            tracing::warn!("Could not refresh the Wayland Unicode keymap: {}", error);
+        }
+    }
+    log_config_warnings(&current);
+    tracing::info!("Config reloaded");
+    Ok(())
 }
 
 fn refresh_app_profile(
@@ -690,6 +703,40 @@ mod tests {
             vec![(trigger.to_string(), "expanded".to_string())],
             TriggerMode::Immediate,
         )
+    }
+
+    #[test]
+    fn reload_keeps_last_valid_config_and_cancels_stale_pending_input_on_success() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir(dir.path().join("match")).unwrap();
+        let path = dir.path().join("match/test.yml");
+        std::fs::write(&path, "matches: [{trigger: ab, replace: old}]").unwrap();
+        let mut config = Config::load_dir(dir.path()).unwrap();
+        let mut engine = Expander::new(config.matches.clone(), TriggerMode::Immediate);
+        let mut input = InputState::default();
+        engine.push_char('a');
+        let expansion = engine.push_char('b').unwrap();
+        queue_expansion(&mut input, 48, expansion);
+        engine.push_char('a');
+        std::fs::write(&path, "matches: [invalid YAML").unwrap();
+        assert!(reload_matching_config(dir.path(), &mut config, &mut engine, &mut input).is_err());
+        assert_eq!(config.matches[0].replace, "old");
+        assert_eq!(engine.push_char('b').unwrap().text, "old");
+        assert!(input.pending_expansion.is_some());
+        // A read failure also preserves the last valid state.
+        std::fs::rename(&path, dir.path().join("saved.yml")).unwrap();
+        std::fs::create_dir(&path).unwrap();
+        // Config loading traverses directories, so use a directory as config.yml.
+        std::fs::create_dir(dir.path().join("config.yml")).unwrap();
+        assert!(reload_matching_config(dir.path(), &mut config, &mut engine, &mut input).is_err());
+        std::fs::rename(dir.path().join("config.yml"), dir.path().join("unused")).unwrap();
+        std::fs::rename(&path, dir.path().join("unused-match-dir")).unwrap();
+        std::fs::write(&path, "matches: [{trigger: ab, replace: new}]").unwrap();
+        engine.push_char('a');
+        reload_matching_config(dir.path(), &mut config, &mut engine, &mut input).unwrap();
+        assert_eq!(config.matches[0].replace, "new");
+        assert!(input.pending_expansion.is_none());
+        assert!(engine.push_char('b').is_none());
     }
 
     #[test]

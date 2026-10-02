@@ -261,33 +261,96 @@ fn update_one(current: &InstalledPack) -> Result<()> {
         current.name,
         std::process::id()
     ));
-    if mirror.exists() {
-        std::fs::rename(&mirror, &mirror_backup)?;
-    }
-    std::fs::rename(&destination, &backup)?;
-    let staging_path = staging.keep();
-    std::fs::rename(&staging_path, &destination)?;
-
-    if let Err(error) = apply_pack(&updated) {
-        let _ = std::fs::remove_dir_all(&destination);
-        let _ = std::fs::rename(&backup, &destination);
-        let _ = remove_mirror(&current.name);
-        if mirror_backup.exists() {
-            let _ = std::fs::rename(&mirror_backup, &mirror);
-        }
-        return Err(error);
-    }
-    if backup.exists() {
-        std::fs::remove_dir_all(&backup)?;
-    }
-    if mirror_backup.exists() {
-        std::fs::remove_dir_all(&mirror_backup)?;
-    }
+    swap_pack_paths(
+        staging.path(),
+        &destination,
+        &backup,
+        &mirror,
+        &mirror_backup,
+        || apply_pack(&updated),
+        |from, to| std::fs::rename(from, to),
+    )?;
     println!(
         "Updated {} {} -> {}",
         current.name, current.version, updated.version
     );
     print_conflicts(&current.name)?;
+    Ok(())
+}
+
+fn swap_pack_paths(
+    staging: &Path,
+    destination: &Path,
+    backup: &Path,
+    mirror: &Path,
+    mirror_backup: &Path,
+    apply: impl FnOnce() -> Result<()>,
+    mut rename: impl FnMut(&Path, &Path) -> std::io::Result<()>,
+) -> Result<()> {
+    // Never overwrite a recovery artifact left by an earlier failed update.
+    if backup.exists() || mirror_backup.exists() {
+        bail!(
+            "pack update backup already exists: {} or {}",
+            backup.display(),
+            mirror_backup.display()
+        );
+    }
+    let mut moved_mirror = false;
+    let mut moved_repository = false;
+    let mut installed_new = false;
+    let mut apply_started = false;
+    let result = (|| -> Result<()> {
+        if mirror.exists() {
+            rename(mirror, mirror_backup)?;
+            moved_mirror = true;
+        }
+        rename(destination, backup)?;
+        moved_repository = true;
+        rename(staging, destination)?;
+        installed_new = true;
+        apply_started = true;
+        apply()
+    })();
+    if let Err(error) = result {
+        // Attempt every independent restoration, even if another one fails.
+        // Originals stay in named backups if rollback itself cannot finish.
+        let mut failures = Vec::new();
+        if installed_new {
+            if let Err(error) = rename(destination, staging) {
+                failures.push(error.to_string());
+            }
+        }
+        if moved_repository {
+            if let Err(error) = rename(backup, destination) {
+                failures.push(error.to_string());
+            }
+        }
+        if apply_started && mirror.exists() {
+            if let Err(error) = std::fs::remove_dir_all(mirror) {
+                failures.push(error.to_string());
+            }
+        }
+        if moved_mirror {
+            if let Err(error) = rename(mirror_backup, mirror) {
+                failures.push(error.to_string());
+            }
+        }
+        if !failures.is_empty() {
+            return Err(error).context(format!(
+                "pack rollback incomplete: {}; recovery paths: {}, {}",
+                failures.join("; "),
+                backup.display(),
+                mirror_backup.display()
+            ));
+        }
+        return Err(error).context("pack update failed; previous repository and matches restored");
+    }
+    if backup.exists() {
+        std::fs::remove_dir_all(backup)?;
+    }
+    if mirror_backup.exists() {
+        std::fs::remove_dir_all(mirror_backup)?;
+    }
     Ok(())
 }
 
@@ -733,6 +796,108 @@ fn signal_reload() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn failed_rollback_keeps_recovery_artifacts() {
+        let root = tempfile::tempdir().unwrap();
+        let staging = root.path().join("staging");
+        let destination = root.path().join("installed");
+        let mirror = root.path().join("mirror");
+        let backup = root.path().join("backup");
+        let mirror_backup = root.path().join("mirror-backup");
+        for path in [&staging, &destination, &mirror] {
+            std::fs::create_dir(path).unwrap();
+            std::fs::write(path.join("value"), "original").unwrap();
+        }
+        let mut operation = 0;
+        let result = swap_pack_paths(
+            &staging,
+            &destination,
+            &backup,
+            &mirror,
+            &mirror_backup,
+            || Ok(()),
+            |from, to| {
+                operation += 1;
+                if operation >= 2 {
+                    return Err(std::io::Error::other("injected persistent failure"));
+                }
+                std::fs::rename(from, to)
+            },
+        );
+        let error = format!("{:#}", result.unwrap_err());
+        assert!(error.contains("rollback incomplete"));
+        assert!(error.contains(mirror_backup.to_str().unwrap()));
+        assert_eq!(
+            std::fs::read_to_string(mirror_backup.join("value")).unwrap(),
+            "original"
+        );
+        assert_eq!(
+            std::fs::read_to_string(destination.join("value")).unwrap(),
+            "original"
+        );
+        // A retry must not overwrite the retained backup.
+        assert!(swap_pack_paths(
+            &staging,
+            &destination,
+            &backup,
+            &mirror,
+            &mirror_backup,
+            || Ok(()),
+            |from, to| std::fs::rename(from, to)
+        )
+        .unwrap_err()
+        .to_string()
+        .contains("backup already exists"));
+        assert!(mirror_backup.join("value").exists());
+    }
+
+    #[test]
+    fn failed_update_renames_restore_both_repository_and_mirror() {
+        for failure in 1..=4 {
+            let root = tempfile::tempdir().unwrap();
+            let staging = root.path().join("staging");
+            let destination = root.path().join("installed");
+            let mirror = root.path().join("mirror");
+            let backup = root.path().join("backup");
+            let mirror_backup = root.path().join("mirror-backup");
+            for (path, text) in [(&staging, "new"), (&destination, "old"), (&mirror, "old")] {
+                std::fs::create_dir(path).unwrap();
+                std::fs::write(path.join("value"), text).unwrap();
+            }
+            let mut operation = 0;
+            let result = swap_pack_paths(
+                &staging,
+                &destination,
+                &backup,
+                &mirror,
+                &mirror_backup,
+                || {
+                    std::fs::create_dir_all(&mirror)?;
+                    std::fs::write(mirror.join("value"), "partial-new")?;
+                    anyhow::bail!("injected apply failure")
+                },
+                |from, to| {
+                    operation += 1;
+                    if operation == failure && failure < 4 {
+                        return Err(std::io::Error::other("injected rename failure"));
+                    }
+                    std::fs::rename(from, to)
+                },
+            );
+            assert!(result.is_err());
+            assert_eq!(
+                std::fs::read_to_string(destination.join("value")).unwrap(),
+                "old",
+                "failure {failure}"
+            );
+            assert_eq!(
+                std::fs::read_to_string(mirror.join("value")).unwrap(),
+                "old",
+                "failure {failure}"
+            );
+        }
+    }
 
     #[test]
     fn validates_pack_names_and_subdirectories() {

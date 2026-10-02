@@ -657,10 +657,10 @@ fn signal_daemon_reload() -> anyhow::Result<()> {
     if !sock.exists() {
         return Ok(()); // Daemon not running, config will be read on next start
     }
-    use std::io::Write;
-    let mut stream = std::os::unix::net::UnixStream::connect(&sock)?;
-    stream.write_all(b"reload\n")?;
-    let _ = stream.shutdown(std::net::Shutdown::Write);
+    let response = send_daemon_command("reload")?;
+    if response != "ok" {
+        anyhow::bail!("reload failed: {response}");
+    }
     Ok(())
 }
 

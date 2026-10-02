@@ -438,3 +438,28 @@ fn branching_nested_matches_stop_at_evaluation_budget() {
     assert!(output.stdout.is_empty());
     assert!(String::from_utf8_lossy(&output.stderr).contains("4096 variable/match evaluations"));
 }
+
+#[test]
+fn reload_cli_reports_daemon_rejection() {
+    use std::io::{BufRead, BufReader, Write};
+    use std::os::unix::net::UnixListener;
+    let h = Harness::new();
+    let runtime = h.0.path().join("runtime");
+    std::fs::create_dir(&runtime).unwrap();
+    let listener = UnixListener::bind(runtime.join("snipexpand.sock")).unwrap();
+    let server = std::thread::spawn(move || {
+        let (mut stream, _) = listener.accept().unwrap();
+        let mut request = String::new();
+        BufReader::new(stream.try_clone().unwrap())
+            .read_line(&mut request)
+            .unwrap();
+        assert_eq!(request, "reload\n");
+        stream
+            .write_all(b"error: invalid candidate configuration\n")
+            .unwrap();
+    });
+    let output = h.run(&["reload"]);
+    server.join().unwrap();
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("invalid candidate configuration"));
+}
