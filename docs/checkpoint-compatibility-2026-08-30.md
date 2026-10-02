@@ -1,4 +1,6 @@
-# Compatibility checkpoint: 2026-08-30
+# Historical compatibility checkpoint: 2026-08-30
+
+Current results: [v0.5.0 integration](release-0.5.0.md).
 
 > Update on 2026-09-02: Signal later exposed intermittent numeric Unicode
 > preedit (`U+1f642`) with the short-lived wtype compose fallback. The current

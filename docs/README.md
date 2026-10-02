@@ -10,6 +10,9 @@
 
 ## Current work — 2026-10-02
 
+- [v0.5.0 integration and release](release-0.5.0.md): combined work, live matrix,
+  installation, verification, and remaining limitations.
+
 - [Completed batch and audit](completion-authoring-batch-2026-10-02.md): 125 passing
   tests, local commits, verification, and later work.
 - [Personal groups](group-contract.md): configuration, persistence, and IPC.

@@ -1,4 +1,8 @@
-# Handoff
+# Historical handoff
+
+Superseded by the authorized [v0.5.0 integration](../../release-0.5.0.md) on
+2026-10-02. The original checkout remains preserved. The restrictions and pending
+results below describe the earlier checkpoint.
 
 ## Status clarification — 2026-10-01
 

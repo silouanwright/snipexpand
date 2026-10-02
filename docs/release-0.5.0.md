@@ -1,0 +1,62 @@
+# SnipExpand v0.5.0 — integration and verification
+
+## Included changes
+
+- Offline snippet preview, cursor metadata, editor schemas, and checked date
+  formatting with IANA timezones.
+- Bounded echo variables with dependency validation and literal escaping.
+- Persistent personal groups, CLI/IPC controls, profile intersection, and native
+  Omarchy plugin switches. The picker hides group-disabled snippets.
+- Generated matcher regression tests; fixes for empty matcher memory growth,
+  case collisions, whole-word boundaries, pack rollback, and stale reload input.
+- Application-aware supplementary Unicode delivery: optional Fcitx5 direct
+  commits for Chromium/Electron, paced compose fallback, and persistent Wayland
+  keymaps elsewhere. Addon diagnostics verify the exact embedded source build.
+
+The Unicode checkout was preserved at its original branch and working state.
+A full source snapshot and live binary/config backups are stored locally in
+`/home/silouan/Documents/ChatGPT/SnipExpand/integration-backup-2026-10-02`.
+Integration commit: `3dde657`. Plugin implementation: `9c5bb08`.
+
+## Automated verification
+
+149 Rust tests, Clippy with warnings denied, formatting, CLI help, and the C++
+bridge build/test pass. The schema includes all integrated Unicode settings.
+The plugin passes manifest validation, locked dependency verification, JS
+model tests, and a real Quickshell Process test for group changes, refresh,
+and error recovery. Light/dark native group views were rendered and inspected.
+
+## Live matrix — 2026-10-02
+
+Omarchy 4.0.4, Hyprland 0.56.2, Fcitx5 5.1.22. Each complete fixture used
+15 ms key events and a 250 ms expansion pause. Every run guarded the exact
+focused window and restored the normal service afterward.
+
+| Target | Result |
+| --- | --- |
+| GTK: Zenity 4.2.2 | Full byte-exact fixture passed |
+| Qt 6.11.2 | Full byte-exact fixture passed |
+| Chromium 152.0.7977.82 | Full byte-exact fixture passed; Fcitx direct commit confirmed in daemon log |
+| Electron 43.6.0 | Full byte-exact fixture passed; Fcitx direct commit confirmed in daemon log |
+| Neovim 0.12.5 clean in Foot 1.28.0 | Full byte-exact file fixture passed |
+| Signal 8.26.0 | Final policy smoke pending; no message sent |
+| Firefox / Zed | Not installed; untested |
+
+The full fixture covers ASCII punctuation, non-Latin and non-BMP Unicode,
+multiline replacement, cursor placement, undo, and 20 consecutive expansions.
+Two launch-only attempts stopped before input while adapting the harness to
+Hyprland's Lua dispatcher and asynchronous focus change. Those attempts are
+not compatibility results.
+
+The v0.5.0 candidate is installed locally and doctor reports keyboard access,
+service readiness, and the matching Fcitx bridge loaded. Publishing is pending.
+
+
+## Scope limits
+
+Generated and offline tests do not prove application transport correctness.
+Live results apply to the recorded application/toolkit versions and timings.
+Firefox and Zed are not installed on this test host. Non-US keyboard layouts,
+hotplug/resume campaigns, and an AUR package remain separate backlog items.
+Fcitx password/sensitive-hint guards apply to the direct-commit path; SnipExpand
+still observes global keyboard events and does not infer browser field types.

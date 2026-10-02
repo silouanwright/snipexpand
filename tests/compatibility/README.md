@@ -96,7 +96,13 @@ Hyprland address and aborts immediately if focus moves to another window.
 The verification copy replaces the current clipboard selection, so preserve
 anything important before running it.
 
-## Application matrix
+## Current application matrix
+
+The [v0.5.0 integration report](../../docs/release-0.5.0.md#live-matrix--2026-10-02)
+records current byte-exact passes for Chromium, Electron, GTK, Qt, and clean
+Neovim. Use that report for current results; the table below is historical.
+
+## Historical application matrix
 
 Use the same fixture for each target application. Record the application
 version, toolkit, active injection backend, event delay, result, and any timing

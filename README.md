@@ -63,7 +63,11 @@ On systems using Fcitx5, `snipexpand install` also builds a small per-user
 bridge for flash-free emoji and other Unicode above U+FFFF in Chromium and
 Electron. This optional bridge uses `busctl` at runtime and needs `c++`,
 `pkg-config`, and the Fcitx5 development files at installation time. SnipExpand
-keeps working through its compose fallback when they are unavailable.
+keeps working through its compose fallback when they are unavailable. `doctor`
+checks that the loaded addon matches the current binary. After an upgrade, an
+older addon can remain in memory until Fcitx5 restarts; on Omarchy use
+`omarchy restart xcompose`, then run `snipexpand doctor` again. Other systems
+can start a new desktop session.
 
 ## Install
 

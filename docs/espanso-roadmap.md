@@ -10,12 +10,9 @@ The architectural comparison below is historical. Current delivery status:
 
 - v0.4.1 shipped keyboard permission setup/diagnostics and plugin Restart feedback.
 - Git/Hub snippet packs already ship, including explicit updates and enable/disable.
-- Commit `fc90d52` on `codex/snippet-authoring` adds offline preview, stronger
-  validation, editor schemas/export, and date timezones. It passed 89 tests,
-  clippy, formatting, and package verification; it is not pushed or released.
-- The next authoring batch is complete locally, including reliability fixes, echo,
-  and personal groups; see [the completion audit](completion-authoring-batch-2026-10-02.md).
-- Unicode/Fcitx5 compatibility remains a separate unfinished workstream.
+- v0.5.0 integrates offline preview, date validation/timezones, editor schemas,
+  bounded echo, persistent personal groups, plugin controls, and Unicode/Fcitx5.
+  See [the integration report](release-0.5.0.md) for current verification.
 
 See [the documentation index](README.md) for implementation/research records and
 [the next-work plan](next-work-2026-10-02.md) for the proposed sequence.
@@ -55,7 +52,7 @@ SnipExpand preserves four small boundaries inside one crate:
 | Configurable word separators | Optional boundary override with the Unicode-aware default preserved |
 | Duplicate triggers | Profile disambiguation for automatic matching and source-selectable picker insertion |
 
-Implemented on the local authoring branch, awaiting integration/release:
+Included in the v0.5.0 integration:
 
 | Capability | Scope |
 | --- | --- |
@@ -63,14 +60,13 @@ Implemented on the local authoring branch, awaiting integration/release:
 | Date hardening and timezones | Checked formats/offsets, IANA zones, one instant per nested expansion |
 | YAML editor support | Settings/match schemas, binary export, schema/parser fixtures |
 | Echo variables | Bounded single-pass rendering, dependency validation, escaping, and globals/local overrides |
-| Generated reliability tests | Unicode matcher, graphs/schema output, pack rollback, and reload regressions; 125 tests now pass |
+| Generated reliability tests | Unicode matcher, graphs/schema output, pack rollback, and reload regressions; 149 tests pass |
 | Named personal groups | File/subtree membership, persistent CLI/IPC controls, profile intersection and dependency filtering |
 
 ## Consider next
 
 | Capability | Decision pressure |
 | --- | --- |
-| Plugin group controls | Use the completed CLI/IPC and inventory metadata for collection buttons |
 | Clipboard backend for long text | Faster long replacements, but clipboard preservation and password-manager behavior need careful design |
 
 Espanso migration is intentionally deferred until SnipExpand's desired

@@ -5,8 +5,9 @@ bottom unless user feedback provides a stronger signal.
 
 ## Snippet authoring batch — 2026-10-01
 
-Implementation on `codex/snippet-authoring`, based on released v0.4.1. This batch
-is separate from the unfinished Unicode/Fcitx5 work and is not yet released.
+Implemented on `codex/snippet-authoring` and integrated with Unicode/Fcitx5
+on `codex/integrated-release` for v0.5.0. See the
+[integration report](docs/release-0.5.0.md) for current validation and delivery.
 
 - [x] Add fallible date rendering and validate formats, offsets, timezone names,
   variable names, and variable-specific parameters before expansion.
@@ -23,7 +24,7 @@ is separate from the unfinished Unicode/Fcitx5 work and is not yet released.
 ## Completed batch — 2026-10-02
 
 See [the next-work plan](docs/next-work-2026-10-02.md) for scope and acceptance.
-The authoring batch is committed as `fc90d52`; it is not released.
+The authoring batch is committed as `fc90d52` and included in the v0.5.0 integration.
 Completion audit and local commits: [completed authoring batch](docs/completion-authoring-batch-2026-10-02.md).
 
 - [x] Build generated matcher tests with an independent reference model; fix
@@ -43,8 +44,8 @@ is [docs/README.md](docs/README.md).
 These tasks should come before adding major expansion features.
 
 - [ ] Build a repeatable application compatibility suite.
-  - Current state:
-    [2026-08-30 compatibility checkpoint](docs/checkpoint-compatibility-2026-08-30.md).
+  - Current state: [v0.5.0 integration report](docs/release-0.5.0.md).
+    The [2026-08-30 checkpoint](docs/checkpoint-compatibility-2026-08-30.md) is historical.
   - [x] Establish an isolated, byte-exact Neovim-in-Foot baseline using the
     real evdev and Wayland injection path.
   - [x] Add reusable browser/Electron and Qt targets plus a byte-exact clipboard
@@ -121,10 +122,11 @@ future feature releases.
   - Automatic typing expands only when app profiles leave one match active.
   - Let launchers select an exact duplicate with its source path through
     `snipexpand paste --source`.
-- [ ] Add named snippet groups and quick enable or disable controls.
-  - Provisional v0.5.0 candidate after the P0 application matrix is complete.
-  - Support global and application-scoped groups.
-  - Expose group state through the CLI and status JSON.
+- [x] Add named personal snippet groups and quick enable or disable controls.
+  - Persistent CLI/IPC choices and native Omarchy plugin controls.
+  - File/subtree membership intersects application-profile filtering.
+  - Structured state is available through `group list --json`; existing status
+    `match_groups` retains its original meaning (match definitions).
 - [x] Add Git-published snippet packs.
   - Treat each installed pack as a read-only, independently enableable group.
   - Auto-detect Espanso `_manifest.yml` plus `package.yml` repositories and
