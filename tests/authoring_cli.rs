@@ -286,3 +286,155 @@ fn schemas_can_be_exported_from_the_binary_without_setup() {
     assert!(!h.run(&["schema", "unknown"]).status.success());
     assert!(!h.0.path().join("config").exists());
 }
+
+#[test]
+fn echo_dependencies_overrides_escaping_and_nested_matches() {
+    let text = include_str!("fixtures/authoring/echo.yml");
+    check_case("match", serde_saphyr::from_str(text).unwrap(), true, true);
+    let h = Harness::new();
+    h.write("match/echo.yml", text);
+    assert_eq!(
+        h.success(&["render", ";signature"]),
+        "Zoë 🦀 — Engineer".as_bytes()
+    );
+    assert_eq!(
+        h.success(&["render", ";literal"]),
+        b"{{name}} | {{name}} | Ada"
+    );
+    assert_eq!(
+        h.success(&["render", ";nested-echo"]),
+        "Hello Zoë 🦀 — Engineer".as_bytes()
+    );
+}
+
+#[test]
+fn echo_validation_rejects_unsupported_parameters_and_dependency_errors() {
+    for variable in [
+        json!({"name":"x","type":"echo"}),
+        json!({"name":"x","type":"echo","params":{"echo":null}}),
+        json!({"name":"x","type":"echo","params":{"echo":"yes","offset":1}}),
+        json!({"name":"x","type":"date","params":{"echo":"yes"}}),
+        json!({"name":"x","type":"echo","depends_on":["y"],"params":{"echo":"yes"}}),
+        json!({"name":"x","type":"date","inject_vars":false}),
+    ] {
+        check_case(
+            "match",
+            json!({"matches":[{"trigger":";test","replace":"{{x}}","vars":[variable]}]}),
+            false,
+            false,
+        );
+    }
+    for echo in ["{{missing}}", "{{x}}"] {
+        check_case(
+            "match",
+            json!({"matches":[{"trigger":";test","replace":"{{x}}","vars":[{"name":"x","type":"echo","params":{"echo":echo}}]}]}),
+            true,
+            false,
+        );
+    }
+    check_case(
+        "match",
+        json!({"matches":[{"trigger":";test","replace":"{{x}}","vars":[{"name":"x","type":"date","params":{"format":"{{missing}}"}}]}]}),
+        true,
+        false,
+    );
+}
+
+#[test]
+fn echo_output_growth_fails_before_preview_writes_output() {
+    let h = Harness::new();
+    let mut vars = vec![json!({"name":"v0","type":"echo","params":{"echo":"x"}})];
+    for index in 1..24 {
+        let prev = index - 1;
+        vars.push(json!({"name":format!("v{index}"),"type":"echo","params":{"echo":format!("{{{{v{prev}}}}}{{{{v{prev}}}}}")}}));
+    }
+    h.write(
+        "match/growth.yml",
+        &json!({"matches":[{"trigger":";growth","replace":"{{v23}}","vars":vars}]}).to_string(),
+    );
+    h.success(&["check"]);
+    let output = h.run(&["render", ";growth"]);
+    assert!(!output.status.success());
+    assert!(output.stdout.is_empty());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("output budget"));
+}
+
+mod generated {
+    use super::*;
+    use proptest::prelude::*;
+
+    proptest! {
+        #[test]
+        fn echo_graph_schema_parser_and_output_agree(count in 1usize..12, branching in any::<bool>(), reverse in any::<bool>(), leaf in "[a-zé猫]{1,8}") {
+            let mut vars = vec![json!({"name":"v0","type":"echo","params":{"echo":leaf}})];
+            for index in 1..count {
+                let prev = index - 1;
+                let reference = format!("{{{{v{prev}}}}}");
+                vars.push(json!({"name":format!("v{index}"),"type":"echo","params":{"echo":if branching { reference.repeat(2) } else { reference }}}));
+            }
+            if reverse { vars.reverse(); }
+            let doc = json!({"matches":[{"trigger":";graph","replace":format!("{{{{v{}}}}}", count - 1),"vars":vars}]});
+            prop_assert!(schema("match").is_valid(&doc));
+            let h = Harness::new();
+            h.write("match/graph.yml", &doc.to_string());
+            let expected = leaf.repeat(if branching { 1 << (count - 1) } else { 1 });
+            prop_assert_eq!(h.success(&["render", ";graph"]), expected.as_bytes());
+        }
+
+        #[test]
+        fn nested_match_graphs_reject_cycles_missing_targets_and_depth(count in 1usize..75, error in 0u8..3, reverse in any::<bool>()) {
+            let mut entries = Vec::new();
+            for index in 0..count {
+                let target = if index + 1 < count { Some(index + 1) } else { match error { 1 => Some(0), 2 => Some(count), _ => None } };
+                entries.push(match target {
+                    Some(target) => json!({"trigger":format!(";g{index}"),"replace":"{{nested}}","vars":[{"name":"nested","type":"match","params":{"trigger":format!(";g{target}")}}]}),
+                    None => json!({"trigger":format!(";g{index}"),"replace":"leaf"}),
+                });
+            }
+            if reverse { entries.reverse(); }
+            let h = Harness::new();
+            h.write("match/graph.yml", &json!({"matches":entries}).to_string());
+            let output = h.run(&["render", ";g0"]);
+            prop_assert_eq!(output.status.success(), error == 0 && count <= 64);
+            if output.status.success() { prop_assert_eq!(output.stdout, b"leaf"); }
+            else { prop_assert!(output.stdout.is_empty()); }
+        }
+
+        #[test]
+        fn echo_graphs_reject_cycles_missing_names_and_depth(count in 1usize..75, error in 0u8..3, reverse in any::<bool>()) {
+            let mut vars = Vec::new();
+            for index in 0..count {
+                let target = if index + 1 < count { Some(index + 1) } else { match error { 1 => Some(0), 2 => Some(count), _ => None } };
+                vars.push(json!({"name":format!("v{index}"),"type":"echo","params":{"echo":target.map_or_else(|| "leaf".to_string(), |t| format!("{{{{v{t}}}}}"))}}));
+            }
+            if reverse { vars.reverse(); }
+            let h = Harness::new();
+            h.write("match/graph.yml", &json!({"matches":[{"trigger":";graph","replace":"{{v0}}","vars":vars}]}).to_string());
+            let output = h.run(&["render", ";graph"]);
+            prop_assert_eq!(output.status.success(), error == 0 && count <= 64);
+            if output.status.success() { prop_assert_eq!(output.stdout, b"leaf"); }
+            else { prop_assert!(output.stdout.is_empty()); }
+        }
+    }
+}
+
+#[test]
+fn branching_nested_matches_stop_at_evaluation_budget() {
+    let h = Harness::new();
+    let mut entries = vec![json!({"trigger":";g0","replace":""})];
+    for index in 1..20 {
+        let target = format!(";g{}", index - 1);
+        entries.push(
+            json!({"trigger":format!(";g{index}"),"replace":"{{a}}{{b}}","vars":[
+                {"name":"a","type":"match","params":{"trigger":target}},
+                {"name":"b","type":"match","params":{"trigger":target}},
+            ]}),
+        );
+    }
+    h.write("match/branch.yml", &json!({"matches":entries}).to_string());
+    h.success(&["check"]);
+    let output = h.run(&["render", ";g19"]);
+    assert!(!output.status.success());
+    assert!(output.stdout.is_empty());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("4096 variable/match evaluations"));
+}

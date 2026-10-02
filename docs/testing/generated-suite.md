@@ -58,3 +58,24 @@ Verified matcher campaign: 10,000 cases × 6 properties, seed `20261002`,
 8.05 seconds test runtime, all passed after fixes. Full baseline after this
 slice: 95 tests passed; Clippy with warnings denied, formatting, and CLI help
 passed. No live setup changes.
+
+## Variable graphs and schemas
+
+Three further properties generate echo DAGs, echo chains, and nested-match
+chains. They check exact Unicode output, forward/reverse declaration order,
+branching, cycles, missing targets, depth 1–74, and echo schema acceptance
+against the real `render` CLI. Static semantic failures may pass the schema;
+that distinction is checked explicitly in the selected invalid fixtures.
+
+Campaign: 2,000 cases × 3 properties, seed `20261002`, 11.59 seconds, passed.
+Run it with the same command above using `--test authoring_cli generated::`
+in place of `--bin snipexpand expander::properties`.
+Selected cases also check escaping, globals/local overrides, optional regex
+captures, echo in packs, Wayland character collection, cumulative byte limits,
+and a branching nested graph that produces empty text but exceeds the evaluation
+budget. Limits cover both validation recursion and rendering.
+
+The branching evaluation regression and graph smoke suite also pass under
+`ulimit -v 2097152` (2 GiB virtual memory) and a 30-second `timeout` per command.
+After echo: 107 tests passed; Clippy with warnings denied, formatting, and CLI
+help passed. Filesystem-failure coverage and named groups remain outstanding.

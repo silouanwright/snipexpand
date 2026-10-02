@@ -63,6 +63,7 @@ impl Harness {
             .args(args)
             .env("XDG_CONFIG_HOME", &self.config_home)
             .env("XDG_DATA_HOME", &self.data_home)
+            .env("XDG_RUNTIME_DIR", self._root.path().join("runtime"))
             .output()
             .unwrap()
     }
@@ -201,5 +202,20 @@ fn git(repo: &Path, args: &[&str]) {
         output.status.success(),
         "git failed: {}",
         String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn pack_validation_and_preview_support_echo() {
+    let harness = Harness::native();
+    write(
+        &harness.repo.join("match/pack.yml"),
+        include_str!("fixtures/authoring/echo.yml"),
+    );
+    harness.commit("echo pack");
+    harness.success(&["pack", "install", harness.repo.to_str().unwrap()]);
+    assert_eq!(
+        harness.success(&["render", ";signature"]),
+        "Zoë 🦀 — Engineer"
     );
 }

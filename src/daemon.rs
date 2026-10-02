@@ -527,6 +527,11 @@ fn wayland_text_characters(config: &Config) -> String {
     text.push('\t');
     for item in &config.matches {
         text.push_str(&item.replace);
+        for variable in &item.vars {
+            if let Some(echo) = &variable.params.echo {
+                text.push_str(echo);
+            }
+        }
     }
     text
 }
@@ -685,6 +690,17 @@ mod tests {
             vec![(trigger.to_string(), "expanded".to_string())],
             TriggerMode::Immediate,
         )
+    }
+
+    #[test]
+    fn echo_unicode_is_included_in_the_wayland_text_keymap() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir(dir.path().join("match")).unwrap();
+        std::fs::write(dir.path().join("match/echo.yml"), "matches: [{trigger: ';echo', replace: '{{v}}', vars: [{name: v, type: echo, params: {echo: '猫🦀'}}]}]").unwrap();
+        let config = Config::load_dir(dir.path()).unwrap();
+        let characters = wayland_text_characters(&config);
+        assert!(characters.contains('猫'));
+        assert!(characters.contains('🦀'));
     }
 
     #[test]

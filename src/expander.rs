@@ -383,10 +383,14 @@ fn matching_suffix(
         let values = regex
             .capture_names()
             .flatten()
-            .filter_map(|name| {
-                captures
-                    .name(name)
-                    .map(|value| (name.to_string(), value.as_str().to_string()))
+            .map(|name| {
+                (
+                    name.to_string(),
+                    captures
+                        .name(name)
+                        .map_or("", |value| value.as_str())
+                        .to_string(),
+                )
             })
             .collect();
         return Some((matched, values));
@@ -463,25 +467,70 @@ fn render(
     captures: &HashMap<String, String>,
     now: chrono::DateTime<chrono::Utc>,
 ) -> Result<String> {
-    let mut result = item.replace.clone();
-    for variable in &item.vars {
+    render_bounded(
+        matches,
+        item,
+        captures,
+        now,
+        &mut crate::template::Budget::default(),
+        1,
+    )
+}
+
+fn render_bounded(
+    matches: &[CompiledMatch],
+    item: &CompiledMatch,
+    captures: &HashMap<String, String>,
+    now: chrono::DateTime<chrono::Utc>,
+    budget: &mut crate::template::Budget,
+    depth: usize,
+) -> Result<String> {
+    if depth > crate::template::MAX_DEPTH {
+        anyhow::bail!("nested match depth exceeds {}", crate::template::MAX_DEPTH);
+    }
+    budget.evaluate()?;
+    let capture_names: Vec<_> = captures.keys().map(String::as_str).collect();
+    let order = crate::template::variable_order(&item.vars, &capture_names)?;
+    let mut values = captures.clone();
+    for index in order {
+        budget.evaluate()?;
+        let variable = &item.vars[index];
         let value = match variable.kind {
-            VariableKind::Date => crate::date::render(&variable.params, now),
+            VariableKind::Date => {
+                let value = crate::date::render(&variable.params, now)?;
+                budget.charge(value.len())?;
+                Ok(value)
+            }
+            VariableKind::Echo => {
+                let text = variable
+                    .params
+                    .echo
+                    .as_deref()
+                    .context("echo variable requires params.echo")?;
+                if variable.inject_vars {
+                    budget.interpolate(text, &values, true)
+                } else {
+                    budget.charge(text.len())?;
+                    Ok(text.to_string())
+                }
+            }
             VariableKind::Match => {
-                let candidate = matches
-                    .iter()
-                    .find(|candidate| candidate.trigger == variable.params.trigger())
+                let mut candidates = matches.iter().filter(|candidate| {
+                    candidate.regex.is_none() && candidate.trigger == variable.params.trigger()
+                });
+                let candidate = candidates
+                    .next()
                     .context("nested match reference is missing")?;
-                render(matches, candidate, &HashMap::new(), now)
+                if candidates.next().is_some() {
+                    anyhow::bail!("nested match reference is ambiguous");
+                }
+                render_bounded(matches, candidate, &HashMap::new(), now, budget, depth + 1)
             }
         }
         .with_context(|| format!("{}: variable '{}'", item.source.display(), variable.name))?;
-        result = result.replace(&format!("{{{{{}}}}}", variable.name), &value);
+        values.insert(variable.name.clone(), value);
     }
-    for (name, value) in captures {
-        result = result.replace(&format!("{{{{{name}}}}}"), value);
-    }
-    Ok(result)
+    budget.interpolate(&item.replace, &values, false)
 }
 
 fn prepare_replacement(replacement: &str) -> (String, usize) {
@@ -942,6 +991,7 @@ mod tests {
         item.vars.push(crate::config::Variable {
             name: "current_year".to_string(),
             kind: VariableKind::Date,
+            inject_vars: true,
             params: crate::config::VariableParams {
                 format: Some("%Y".to_string()),
                 ..Default::default()
@@ -965,6 +1015,7 @@ mod tests {
         greeting.vars.push(crate::config::Variable {
             name: "person".into(),
             kind: VariableKind::Match,
+            inject_vars: true,
             params: crate::config::VariableParams {
                 trigger: Some(";name".into()),
                 ..Default::default()
@@ -1047,6 +1098,7 @@ mod tests {
             item.vars.push(crate::config::Variable {
                 name: "date".into(),
                 kind: VariableKind::Date,
+                inject_vars: true,
                 params: crate::config::VariableParams {
                     offset: Some(i64::MAX),
                     ..Default::default()
@@ -1065,6 +1117,31 @@ mod tests {
     }
 
     #[test]
+    fn echo_can_use_optional_regex_captures_and_literal_braces() {
+        let mut item = structured_match("", "{{output}} {{id}}");
+        item.triggers.clear();
+        item.regex = Some("issue-(?P<id>[0-9]+)?".into());
+        item.vars.push(crate::config::Variable {
+            name: "output".into(),
+            kind: VariableKind::Echo,
+            inject_vars: true,
+            params: crate::config::VariableParams {
+                echo: Some(r"\{\{id}}={{id}}".into()),
+                ..Default::default()
+            },
+        });
+        let mut engine = Expander::new(vec![item], TriggerMode::Space);
+        for (typed, expected) in [("issue-12 ", "{{id}}=12 12"), ("issue- ", "{{id}}= ")] {
+            let output = typed
+                .chars()
+                .filter_map(|c| engine.push_char(c))
+                .last()
+                .unwrap();
+            assert_eq!(output.text, expected);
+        }
+    }
+
+    #[test]
     fn nested_date_variables_share_one_render_instant() {
         let now = chrono::DateTime::parse_from_rfc3339("2026-12-31T23:59:59.999999999Z")
             .unwrap()
@@ -1072,6 +1149,7 @@ mod tests {
         let date = crate::config::Variable {
             name: "stamp".into(),
             kind: VariableKind::Date,
+            inject_vars: true,
             params: crate::config::VariableParams {
                 format: Some("%Y-%m-%dT%H:%M:%S%.9fZ".into()),
                 tz: Some("UTC".into()),
@@ -1086,6 +1164,7 @@ mod tests {
             crate::config::Variable {
                 name: "nested".into(),
                 kind: VariableKind::Match,
+                inject_vars: true,
                 params: crate::config::VariableParams {
                     trigger: Some(";child".into()),
                     ..Default::default()

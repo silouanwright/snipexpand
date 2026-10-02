@@ -1,0 +1,34 @@
+global_vars:
+  - name: signature
+    type: echo
+    params:
+      echo: '{{name}} — {{role}}'
+  - name: name
+    type: echo
+    params: {echo: 'Ada'}
+  - name: role
+    type: echo
+    params: {echo: 'Engineer'}
+matches:
+  - trigger: ';signature'
+    replace: '{{signature}}'
+    vars:
+      - name: name
+        type: echo
+        params: {echo: 'Zoë 🦀'}
+  - trigger: ';literal'
+    replace: '{{literal}} | \{\{name}} | {{name}}'
+    vars:
+      - name: literal
+        type: echo
+        inject_vars: false
+        params: {echo: '{{name}}'}
+  - trigger: ';nested-echo'
+    replace: '{{greeting}}'
+    vars:
+      - name: greeting
+        type: echo
+        params: {echo: 'Hello {{nested}}'}
+      - name: nested
+        type: match
+        params: {trigger: ';signature'}

@@ -2,7 +2,7 @@
 
 SnipExpand provides separate JSON schemas for settings (`config.schema.json`)
 and match files (`match.schema.json`). They describe SnipExpand's supported
-format, including date timezones. They are not substitutes for Espanso's schemas.
+format, including date timezones and echo variables. They are not substitutes for Espanso's schemas.
 
 ## Export the schemas from an installed binary
 
@@ -45,12 +45,12 @@ the Cargo package, so schema export works offline.
 ## What the editor checks
 
 - Supported keys, value types, trigger alternatives, and numeric settings ranges.
-- Date and nested-match parameter shapes, including the `tz` field.
+- Date, nested-match, and echo parameter shapes, including `tz` and `inject_vars`.
 - Required profile filters and case-propagation settings.
 
 Run `snipexpand check` for semantic validation: valid date formats and ranges,
 known timezone names, variable names, regex syntax, duplicate variable names,
-profile paths, and nested-reference cycles or missing targets. The editor does
+profile paths, dependency depth, and echo/nested-reference cycles or missing targets. The editor does
 not have the complete loaded configuration or the runtime timezone database.
 Schema success alone does not prove a snippet can expand in an application.
 

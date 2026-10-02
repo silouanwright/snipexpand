@@ -91,8 +91,15 @@
                 "trigger": {
                   "type": "null",
                   "description": "Unused for date variables; omit this key."
+                },
+                "echo": {
+                  "type": "null"
                 }
               }
+            },
+            "inject_vars": {
+              "const": true,
+              "description": "Only echo variables support disabling parameter injection."
             }
           },
           "required": [
@@ -131,10 +138,64 @@
                 "tz": {
                   "type": "null",
                   "description": "Unused for match variables; omit this key."
+                },
+                "echo": {
+                  "type": "null"
                 }
               },
               "required": [
                 "trigger"
+              ]
+            },
+            "inject_vars": {
+              "const": true,
+              "description": "Only echo variables support disabling parameter injection."
+            }
+          },
+          "required": [
+            "name",
+            "type",
+            "params"
+          ]
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "name": {
+              "type": "string",
+              "minLength": 1
+            },
+            "type": {
+              "const": "echo"
+            },
+            "inject_vars": {
+              "type": "boolean",
+              "default": true
+            },
+            "params": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "echo": {
+                  "type": "string",
+                  "description": "Literal text or references to variables/captures. Single-pass interpolation; use inject_vars: false for literal braces."
+                },
+                "trigger": {
+                  "type": "null"
+                },
+                "format": {
+                  "type": "null"
+                },
+                "offset": {
+                  "type": "null"
+                },
+                "tz": {
+                  "type": "null"
+                }
+              },
+              "required": [
+                "echo"
               ]
             }
           },

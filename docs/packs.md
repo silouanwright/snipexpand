@@ -100,3 +100,7 @@ checkout, URLs containing embedded credentials are rejected, and installed
 files are validated with the same bounded YAML parser as personal configuration.
 Edit personal match files instead of the generated pack mirror. Disable or
 remove a pack through the CLI.
+
+Echo variables are supported on the authoring branch under the same
+[dependency and rendering limits](variables.md) as personal snippets. Inspection
+checks static dependencies; use `render` to exercise cumulative output limits.

@@ -65,8 +65,8 @@ listed matching and timing settings. The first matching profile wins.
 
 ## Unsupported and rejected
 
-- Date `locale` overrides and variable injection inside parameter values
-- Shell, script, clipboard, random, echo, choice, and form variables
+- Date `locale` overrides and variable injection outside `params.echo`
+- Shell, script, clipboard, random, choice, and form variables
 - Forms, images, HTML, and Markdown effects
 - Imports and anchors
 - Espanso's separate per-app config files; SnipExpand uses `app_profiles`
@@ -103,3 +103,10 @@ Date and nested-match variables reject irrelevant parameters. Date formats,
 known timezones, and representable offset results are checked during loading;
 runtime rendering also returns errors if the clock or result becomes invalid.
 All dates in a single expansion use the same instant, including nested matches.
+
+## Echo and dependency limits
+
+The authoring branch supports `type: echo`, references inside `params.echo`,
+`inject_vars: false`, and escaped opening braces. Dependency order, substitution,
+and rendering limits are specified in [variables.md](variables.md). Schemas,
+`check`, `render`, and pack inspection share the supported field shapes.

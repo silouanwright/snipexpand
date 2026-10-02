@@ -21,7 +21,7 @@ Fast, config-based text expansion for Linux and Wayland. **First-class support f
 - Recursive YAML configuration with automatic reload
 - Multiple triggers for one replacement
 - Regex triggers with named captures
-- Reusable nested snippets and date variables
+- Reusable echo values, nested snippets, and date variables
 - Configurable word boundaries and case propagation
 - Search labels and terms for picker integrations
 - Immediate Backspace undo for simple expansions
@@ -247,10 +247,17 @@ is 24 hours, which can differ from the same local time tomorrow across a
 daylight-saving transition. Full locale overrides remain unsupported.
 
 Date variables accept `format`, `offset`, and `tz`; nested-match variables accept
-`trigger`. Variable names use letters, numbers, or underscores. Unsupported
+`trigger`; echo variables accept `echo`. Variable names use letters, numbers, or underscores. Unsupported
 parameters are rejected, including on unused global definitions, so `check`
 catches mistakes before expansion. If rendering later fails, automatic expansion
 leaves the typed trigger intact and logs the error.
+
+### Reusable echo variables
+
+Define `type: echo` with `params: {echo: 'Your text'}` to reuse a value.
+Echo parameters support references to other variables, with dependency checks,
+literal-brace escaping, and bounded output. See [variables and rendering limits](docs/variables.md)
+for examples and the supported Espanso subset.
 
 ### Editor autocomplete and validation
 
@@ -392,8 +399,8 @@ by `list --json`.
   text or images, or provide a package registry.
 - Regex triggers use a bounded rolling buffer and support named captures, but
   do not implement Espanso's full regex behavior.
-- Variables are limited to formatted dates, regex captures, and safe nested
-  snippet references. Shell, script, and form variables are intentionally
+- Variables are limited to echo text, formatted dates, regex captures, and safe
+  nested snippet references. Shell, script, and form variables are intentionally
   unsupported.
 - Application exclusions operate at the application level. Wayland does not
   expose a browser's focused field type, so SnipExpand cannot automatically

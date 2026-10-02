@@ -9,6 +9,7 @@ mod keyboard;
 mod packs;
 mod permissions;
 mod preview;
+mod template;
 
 use clap::{Parser, Subcommand};
 

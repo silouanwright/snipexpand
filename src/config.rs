@@ -304,6 +304,8 @@ pub struct Variable {
     pub name: String,
     #[serde(rename = "type")]
     pub kind: VariableKind,
+    #[serde(default = "default_true")]
+    pub inject_vars: bool,
     #[serde(default)]
     pub params: VariableParams,
 }
@@ -313,11 +315,14 @@ pub struct Variable {
 pub enum VariableKind {
     Date,
     Match,
+    Echo,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct VariableParams {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub echo: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub format: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -339,10 +344,41 @@ impl Variable {
         if self.name.is_empty() || !self.name.chars().all(|c| c.is_alphanumeric() || c == '_') {
             bail!("variable name must contain only letters, numbers, or underscores");
         }
+        if self.kind != VariableKind::Echo && !self.inject_vars {
+            bail!("inject_vars: false is supported only for echo variables");
+        }
+        for text in [
+            self.params.echo.as_deref(),
+            self.params.format.as_deref(),
+            self.params.trigger.as_deref(),
+            self.params.tz.as_deref(),
+        ]
+        .into_iter()
+        .flatten()
+        {
+            if text.len() > crate::template::MAX_RENDER_BYTES {
+                bail!("variable parameter exceeds 1 MiB");
+            }
+            if self.kind != VariableKind::Echo && !crate::template::references(text).is_empty() {
+                bail!("parameter references are supported only in params.echo");
+            }
+        }
         match self.kind {
+            VariableKind::Echo => {
+                if self.params.echo.is_none() {
+                    bail!("echo variable '{}' requires params.echo", self.name);
+                }
+                if self.params.format.is_some()
+                    || self.params.offset.is_some()
+                    || self.params.trigger.is_some()
+                    || self.params.tz.is_some()
+                {
+                    bail!("echo variables only accept params.echo");
+                }
+            }
             VariableKind::Date => {
-                if self.params.trigger.is_some() {
-                    bail!("date variables do not accept params.trigger");
+                if self.params.trigger.is_some() || self.params.echo.is_some() {
+                    bail!("date variables do not accept params.trigger or params.echo");
                 }
                 crate::date::validate(&self.params)?;
             }
@@ -350,7 +386,8 @@ impl Variable {
                 if self.params.trigger().is_empty() {
                     bail!("match variable '{}' requires params.trigger", self.name);
                 }
-                if self.params.format.is_some()
+                if self.params.echo.is_some()
+                    || self.params.format.is_some()
                     || self.params.offset.is_some()
                     || self.params.tz.is_some()
                 {
@@ -601,6 +638,22 @@ impl Config {
                 })?;
             }
         }
+        for item in &self.matches {
+            if item.replace.len() > crate::template::MAX_RENDER_BYTES {
+                bail!("{}: replacement exceeds 1 MiB", item.source.display());
+            }
+            let regex = item
+                .regex
+                .as_ref()
+                .map(|pattern| regex::Regex::new(pattern))
+                .transpose()?;
+            let captures: Vec<&str> = regex
+                .as_ref()
+                .map(|r| r.capture_names().flatten().collect())
+                .unwrap_or_default();
+            crate::template::variable_order(&item.vars, &captures)
+                .with_context(|| format!("{}: variable dependencies", item.source.display()))?;
+        }
         self.validate_match_references()?;
         self.validate_profile_references()?;
         Ok(())
@@ -624,9 +677,9 @@ impl Config {
                 },
             );
         let mut visiting = HashSet::new();
-        let mut visited = HashSet::new();
+        let mut visited = HashMap::new();
         for index in 0..self.matches.len() {
-            validate_match_reference(index, self, &by_trigger, &mut visiting, &mut visited)?;
+            validate_match_reference(index, self, &by_trigger, &mut visiting, &mut visited, 1)?;
         }
         Ok(())
     }
@@ -823,10 +876,14 @@ fn validate_match_reference(
     config: &Config,
     by_trigger: &HashMap<&str, Vec<usize>>,
     visiting: &mut HashSet<usize>,
-    visited: &mut HashSet<usize>,
-) -> Result<()> {
-    if visited.contains(&index) {
-        return Ok(());
+    visited: &mut HashMap<usize, usize>,
+    depth: usize,
+) -> Result<usize> {
+    if depth > crate::template::MAX_DEPTH {
+        bail!("nested match depth exceeds {}", crate::template::MAX_DEPTH);
+    }
+    if let Some(&height) = visited.get(&index) {
+        return Ok(height);
     }
     if !visiting.insert(index) {
         bail!(
@@ -834,6 +891,7 @@ fn validate_match_reference(
             config.matches[index].source.display()
         );
     }
+    let mut height = 1;
     for variable in &config.matches[index].vars {
         if variable.kind != VariableKind::Match {
             continue;
@@ -855,11 +913,16 @@ fn validate_match_reference(
             );
         }
         let target = targets[0];
-        validate_match_reference(target, config, by_trigger, visiting, visited)?;
+        height = height.max(
+            1 + validate_match_reference(target, config, by_trigger, visiting, visited, depth + 1)?,
+        );
     }
     visiting.remove(&index);
-    visited.insert(index);
-    Ok(())
+    if height > crate::template::MAX_DEPTH {
+        bail!("nested match depth exceeds {}", crate::template::MAX_DEPTH);
+    }
+    visited.insert(index, height);
+    Ok(height)
 }
 
 fn normalized_search_terms(values: &[String]) -> Vec<String> {
