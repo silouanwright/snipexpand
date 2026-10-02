@@ -31,8 +31,8 @@ the refreshed installed panel now displays Groups and passes Tab/Space navigatio
 to its empty state and Escape navigation back and out. Real group mutations
 are covered by the Quickshell Process test.
 
-[Ubuntu CI passed](https://github.com/silouanwright/snipexpand/actions/runs/36972172981)
-for daemon commit `c5d3682`, including the C++ bridge and all Rust tests. Package
+[Ubuntu CI passed](https://github.com/silouanwright/snipexpand/actions/runs/36974279043)
+for released daemon commit `1cb979e`, including the C++ bridge and all Rust tests. Package
 verification built the actual 60-file crate in a separate target directory.
 
 ## Live matrix — 2026-10-02
@@ -62,8 +62,27 @@ the bridge's sensitive-hint suppression branch. This verifies Signal delivery
 under both settings, but does not demonstrate live sensitive-field blocking;
 that guard has deterministic C++ coverage. No message was sent.
 
-The v0.5.0 candidate is installed locally and doctor reports keyboard access,
-service readiness, and the matching Fcitx bridge loaded. Publishing is pending.
+The v0.5.0 daemon is installed locally and doctor reports all checks passing,
+including keyboard access, service readiness, and the matching Fcitx bridge.
+The installed plugin is at release commit `eb09407`.
+
+## Published artifacts
+
+- [Daemon v0.5.0](https://github.com/silouanwright/snipexpand/releases/tag/v0.5.0),
+  tagged at `1cb979e`.
+- [Omarchy plugin v0.5.0](https://github.com/silouanwright/snipexpand-omarchy/releases/tag/v0.5.0),
+  tagged at `eb09407`.
+- [Release pipeline](https://github.com/silouanwright/snipexpand/actions/runs/36974280790)
+  passed both architecture builds, GitHub publication, and crates.io publication.
+- Both downloaded Linux binaries matched their published SHA-256 files. The
+  downloaded x86_64 binary reports `snipexpand 0.5.0`; the aarch64 binary was
+  checksum-verified but not executed on this x86_64 host.
+- [crates.io 0.5.0](https://crates.io/crates/snipexpand/0.5.0) is present in the
+  registry index and its downloaded archive matches the index checksum:
+  `992d108e0875de19a6817537e843964b9603372a26e5fde1fcc1cd77fba1d797`.
+
+Release work is complete. Further routine graphical tests use the isolated
+Omarchy VM documented in the local compatibility guide.
 
 ## Scope limits
 

@@ -15,7 +15,7 @@ bottom unless user feedback provides a stronger signal.
   Both settings delivered the emoji; this composer did not trigger the sensitive
   hint guard. Drafts were cleared and the normal service restored.
 - [x] Verify the refreshed installed plugin view and keyboard controls.
-- [ ] Tag and publish the daemon and plugin, verify both release artifacts and
+- [x] Tag and publish the daemon and plugin, verify both release artifacts and
   crates.io publication, and record final delivery evidence.
 
 Current evidence: [integration report](docs/release-0.5.0.md).
