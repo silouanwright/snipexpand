@@ -2,6 +2,7 @@
 
 ## Scope and state
 
+Implementation commit: `fc90d52`.
 Branch: `codex/snippet-authoring`, based on released main `4b8d649` (v0.4.1).
 Checkout: `/home/silouan/Work/projects/snipexpand-authoring`.
 The separate `codex/fcitx5-direct-commit` checkout retains the unfinished Unicode
@@ -46,3 +47,11 @@ No live keyboard tests, Fcitx reload, installed daemon replacement, version bump
 remote push, or release was performed. Review/merge this branch independently;
 reconcile the unfinished Unicode branch with these renderer/config changes later.
 Echo variables, locale overrides, and named personal groups remain follow-ups.
+
+Documentation follow-up on 2026-10-02: see [the next-work plan](next-work-2026-10-02.md)
+for the proposed generated-test suite, echo support, and groups. The 89-test
+result above belongs to the implementation validation; it was not rerun for
+this documentation-only update.
+
+Subsequent implementation is tracked in the
+[2026-10-02 reliability/echo checkpoint](checkpoint-reliability-2026-10-02.md).
