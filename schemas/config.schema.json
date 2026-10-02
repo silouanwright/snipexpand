@@ -106,6 +106,36 @@
     "undo_enabled": {
       "type": "boolean",
       "default": true
+    },
+    "snippet_groups": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]+$"
+          },
+          "match_files": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "enabled": {
+            "type": "boolean",
+            "default": true
+          }
+        },
+        "required": [
+          "name",
+          "match_files"
+        ]
+      },
+      "description": "Personal file/subtree collections. Paths relative to match/; packs/ is excluded. Run check for path and name uniqueness validation."
     }
   },
   "definitions": {

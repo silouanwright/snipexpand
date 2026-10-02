@@ -25,7 +25,7 @@ Fast, config-based text expansion for Linux and Wayland. **First-class support f
 - Configurable word boundaries and case propagation
 - Search labels and terms for picker integrations
 - Immediate Backspace undo for simple expansions
-- Application exclusions and per-application profiles
+- Application exclusions, per-application profiles, and persistent personal groups
 - Pause and resume controls through the CLI, IPC, and Omarchy plugin
 - Deliberate duplicate-trigger selection by source
 - Git-published snippet packs with pinned revisions and explicit updates
@@ -196,6 +196,32 @@ matches:
           trigger: ";name"
 ```
 
+## Personal snippet groups
+
+Define collections in `config.yml` using paths relative to `match/`:
+
+```yaml
+snippet_groups:
+  - name: work
+    match_files: [work, signatures.yml]
+    enabled: true
+```
+
+```sh
+snipexpand group list --json
+snipexpand group disable work
+snipexpand group enable work
+snipexpand group toggle work
+```
+
+Changes persist in `groups.json`, preserving your YAML comments. Commands update
+an available daemon or save preferences for its next start. Group selection
+applies to automatic expansion, `paste`, and offline `render`; source selection
+cannot bypass it. App profiles can further restrict snippets. Dependents of an
+inactive nested snippet are also inactive until their targets become available.
+Packs retain their separate controls. See [personal group behavior and IPC](docs/group-contract.md)
+for overlap, counts, persistence failures, and profile/pack precedence.
+
 ## Preview and validate snippets
 
 ```bash
@@ -216,7 +242,7 @@ or visual columns.
 Use `--source` or `--profile` to resolve duplicates. Source paths may be absolute
 or relative to the current directory. A profile is selected by name without
 examining the focused window; a disabled profile produces an error. Without
-`--profile`, all configured matches are considered. This previews insertion,
+`--profile`, enabled groups and their available dependencies are considered. This previews insertion,
 not the typed matching process: word boundaries, typed-case propagation, app
 exclusions, and regex sample input are not simulated.
 
@@ -375,6 +401,8 @@ status [--json]                  Show daemon and configuration status
 doctor                           Diagnose setup and runtime requirements
 install                          Install and start the user service
 uninstall                        Remove the service; preserve configuration
+group list [--json]              List personal collections and availability
+group enable|disable|toggle NAME Change a persistent collection preference
 pack inspect SOURCE              Validate a Git-published pack
 pack install SOURCE              Install and enable a pack
 pack list                        List installed packs
@@ -385,7 +413,7 @@ pack remove NAME                 Remove an installed pack
 ```
 
 Duplicate triggers may coexist for picker use. Automatic typing expands only
-when the active app profile leaves one matching snippet. A picker can select an
+when enabled groups and the active app profile leave one matching snippet. A picker can select an
 exact duplicate with `paste --source PATH TRIGGER`, using the `source` returned
 by `list --json`.
 

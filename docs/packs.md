@@ -104,3 +104,9 @@ remove a pack through the CLI.
 Echo variables are supported on the authoring branch under the same
 [dependency and rendering limits](variables.md) as personal snippets. Inspection
 checks static dependencies; use `render` to exercise cumulative output limits.
+
+Personal `snippet_groups` cannot select `match/packs/`. They can suppress a
+personal snippet that references an enabled pack, but they do not disable the
+pack itself. Disabling/removing a pack still fails if doing so would leave a
+configured nested reference missing, even when that personal snippet is in a
+disabled group. See [group precedence](group-contract.md).

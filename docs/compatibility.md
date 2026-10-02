@@ -19,15 +19,16 @@ than silently changing their behavior.
 | `right_word` | Core | The typed separator is preserved |
 | `propagate_case` | Full | Case-insensitive trigger with replacement casing |
 | `uppercase_style` | Full | `uppercase`, `capitalize`, or `capitalize_words` |
-| `global_vars` | Core | Date and nested-match variables applied to every match in the file |
-| match `vars` | Core | Date and nested-match variables applied after global variables |
+| `global_vars` | Core | Date, echo, and nested-match variables merged into every match in the file |
+| match `vars` | Core | Local definitions override globals; dependencies determine evaluation order |
 | date `format` | Full | Chrono/strftime formatting |
 | date `offset` | Full | Signed elapsed seconds, checked for overflow |
 | date `tz` | Core | IANA timezone names; invalid names are errors rather than Espanso's local-time fallback |
-| nested `match` variable | Full | References another trigger; missing references and cycles are rejected |
+| nested `match` variable | Core | Exact references; missing/ambiguous references, cycles, and excessive depth are rejected |
+| `echo` variable | Core | References in `params.echo`, escaping, and `inject_vars: false`; bounded output |
 | Multiple files | Full | Recursive `.yml` and `.yaml` discovery |
 | `regex` | Core | Suffix matching with named captures exposed as `{{name}}`; bounded by `regex_max_buffer` |
-| Duplicate triggers | Core | Source-selectable through `paste`; automatic typing requires profile disambiguation |
+| Duplicate triggers | Core | Source-selectable through `paste`; automatic typing requires group/profile disambiguation |
 
 ## SnipExpand-specific settings
 
@@ -61,7 +62,10 @@ app_profiles:           # first matching profile wins
 
 Profile filters accept `title`, `class`, and `exec` regular expressions. A
 profile can enable or disable expansion, select match files, and override the
-listed matching and timing settings. The first matching profile wins.
+listed matching and timing settings. The first matching profile wins. Group selection is always applied as well.
+Snippets whose nested targets are filtered out are suppressed transitively,
+including when a profile excludes the target. Static missing/cyclic references
+remain validation errors.
 
 ## Unsupported and rejected
 
@@ -110,3 +114,10 @@ The authoring branch supports `type: echo`, references inside `params.echo`,
 `inject_vars: false`, and escaped opening braces. Dependency order, substitution,
 and rendering limits are specified in [variables.md](variables.md). Schemas,
 `check`, `render`, and pack inspection share the supported field shapes.
+
+## Personal groups
+
+`snippet_groups` configures named personal file/subtree collections. Preferences
+persist separately and are managed through `group list/enable/disable/toggle`.
+This is a SnipExpand extension. See [the group contract](group-contract.md) for
+profile/pack/reference precedence, inventory metadata, and the IPC protocol.

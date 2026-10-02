@@ -61,6 +61,8 @@ pub struct Settings {
     pub app_exclusions: Vec<AppFilter>,
     #[serde(default)]
     pub app_profiles: Vec<AppProfile>,
+    #[serde(default)]
+    pub snippet_groups: Vec<crate::groups::Group>,
     #[serde(default = "default_true")]
     pub undo_enabled: bool,
 }
@@ -79,6 +81,7 @@ impl Default for Settings {
             injection_settle_ms: default_injection_settle_ms(),
             app_exclusions: Vec::new(),
             app_profiles: Vec::new(),
+            snippet_groups: Vec::new(),
             undo_enabled: true,
         }
     }
@@ -404,6 +407,8 @@ pub struct Config {
     pub settings: Settings,
     pub matches: Vec<Match>,
     pub loaded_files: Vec<PathBuf>,
+    pub match_root: PathBuf,
+    pub group_state: crate::groups::State,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -500,7 +505,11 @@ impl Config {
     }
 
     pub fn load_dir(dir: &Path) -> Result<Self> {
-        let mut config = Self::default();
+        let mut config = Self {
+            match_root: dir.join("match"),
+            group_state: crate::groups::read_state(dir)?,
+            ..Self::default()
+        };
         let settings_path = dir.join("config.yml");
         if settings_path.exists() {
             let content = std::fs::read_to_string(&settings_path)
@@ -655,7 +664,7 @@ impl Config {
                 .with_context(|| format!("{}: variable dependencies", item.source.display()))?;
         }
         self.validate_match_references()?;
-        self.validate_profile_references()?;
+        crate::groups::validate(&self.settings.snippet_groups)?;
         Ok(())
     }
 
@@ -684,41 +693,6 @@ impl Config {
         Ok(())
     }
 
-    fn validate_profile_references(&self) -> Result<()> {
-        for profile in &self.settings.app_profiles {
-            for item in self
-                .matches
-                .iter()
-                .filter(|item| profile.includes_source(&item.source))
-            {
-                for variable in item
-                    .vars
-                    .iter()
-                    .filter(|variable| variable.kind == VariableKind::Match)
-                {
-                    let target = self
-                        .matches
-                        .iter()
-                        .find(|candidate| {
-                            candidate
-                                .triggers
-                                .iter()
-                                .any(|trigger| trigger == variable.params.trigger())
-                        })
-                        .expect("nested match references were validated");
-                    if !profile.includes_source(&target.source) {
-                        bail!(
-                            "app profile '{}': nested trigger '{}' is excluded",
-                            profile.name,
-                            variable.params.trigger()
-                        );
-                    }
-                }
-            }
-        }
-        Ok(())
-    }
-
     pub fn excludes_app(&self, app: &crate::app::AppInfo) -> bool {
         self.settings
             .app_exclusions
@@ -726,17 +700,73 @@ impl Config {
             .any(|filter| filter.matches(app))
     }
 
-    pub fn matches_for_profile(&self, index: Option<usize>) -> Vec<Match> {
-        let Some(profile) = index.and_then(|index| self.settings.app_profiles.get(index)) else {
-            return self.matches.clone();
-        };
-        if !profile.enabled {
+    pub fn group_enabled(&self, group: &crate::groups::Group) -> bool {
+        self.group_state
+            .enabled
+            .get(&group.name)
+            .copied()
+            .unwrap_or(group.enabled)
+    }
+
+    pub fn groups_for_source(&self, source: &Path) -> Vec<String> {
+        let Ok(relative) = source.strip_prefix(&self.match_root) else {
             return Vec::new();
+        };
+        self.settings
+            .snippet_groups
+            .iter()
+            .filter(|group| group.contains(relative))
+            .map(|group| group.name.clone())
+            .collect()
+    }
+
+    pub fn active_match_indices(&self, index: Option<usize>) -> HashSet<usize> {
+        let profile = index.and_then(|index| self.settings.app_profiles.get(index));
+        let mut active: HashSet<_> =
+            self.matches
+                .iter()
+                .enumerate()
+                .filter(|(_, item)| {
+                    profile.is_none_or(|p| p.enabled && p.includes_source(&item.source))
+                        && item
+                            .source
+                            .strip_prefix(&self.match_root)
+                            .map_or(true, |relative| {
+                                self.settings.snippet_groups.iter().all(|group| {
+                                    !group.contains(relative) || self.group_enabled(group)
+                                })
+                            })
+                })
+                .map(|(index, _)| index)
+                .collect();
+        // Validation has already proved a bounded acyclic reference graph.
+        // Filtering may remove a target; then remove its consumers transitively.
+        loop {
+            let triggers: HashSet<_> = active
+                .iter()
+                .flat_map(|&index| self.matches[index].triggers.iter().map(String::as_str))
+                .collect();
+            let before = active.len();
+            active.retain(|&index| {
+                self.matches[index].vars.iter().all(|variable| {
+                    variable.kind != VariableKind::Match
+                        || triggers.contains(variable.params.trigger())
+                })
+            });
+            if active.len() == before {
+                break;
+            }
         }
+        active
+    }
+
+    pub fn matches_for_profile(&self, index: Option<usize>) -> Vec<Match> {
+        let active = self.active_match_indices(index);
         self.matches
             .iter()
-            .filter(|item| profile.includes_source(&item.source))
-            .cloned()
+            .enumerate()
+            .filter(|(index, _)| active.contains(index))
+            .map(|(_, item)| item.clone())
             .collect()
     }
 

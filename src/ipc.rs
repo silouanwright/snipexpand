@@ -17,6 +17,7 @@ pub enum IpcCmd {
     Enable,
     Disable,
     Toggle,
+    Group(crate::groups::Request),
     Paste {
         trigger: String,
         source: Option<String>,
@@ -77,6 +78,17 @@ impl IpcServer {
                 "enable" => return Ok((IpcCmd::Enable, reader.into_inner())),
                 "disable" => return Ok((IpcCmd::Disable, reader.into_inner())),
                 "toggle" => return Ok((IpcCmd::Toggle, reader.into_inner())),
+                value if value.starts_with("group\t") => match serde_json::from_str(&value[6..]) {
+                    Ok(request) => return Ok((IpcCmd::Group(request), reader.into_inner())),
+                    Err(error) => {
+                        let response = crate::groups::Response::Error {
+                            error: format!("invalid group request: {error}"),
+                        };
+                        let mut wire = serde_json::to_vec(&response)?;
+                        wire.push(b'\n');
+                        reader.into_inner().write_all(&wire).await?;
+                    }
+                },
                 value if value.starts_with("paste\t") => {
                     let request = match serde_json::from_str(&value[6..])? {
                         PasteRequestWire::Trigger(trigger) => PasteRequest {
@@ -129,6 +141,34 @@ mod tests {
     /// Helper: create a temporary socket path inside a TempDir.
     fn tmp_sock(dir: &TempDir) -> PathBuf {
         dir.path().join("test.sock")
+    }
+
+    #[tokio::test]
+    async fn group_protocol_reports_bad_requests_and_keeps_accepting() {
+        let dir = TempDir::new().unwrap();
+        let path = tmp_sock(&dir);
+        let server = IpcServer::new(&path).await.unwrap();
+        let client = tokio::spawn(async move {
+            let response = send_cmd(&path, r#"group	{"operation":"toggle"}"#)
+                .await
+                .unwrap();
+            assert!(matches!(
+                serde_json::from_str::<crate::groups::Response>(&response).unwrap(),
+                crate::groups::Response::Error { .. }
+            ));
+            send_cmd(&path, r#"group	{"operation":"toggle","name":"work"}"#)
+                .await
+                .unwrap()
+        });
+        let (cmd, mut stream) = server.accept().await.unwrap();
+        assert!(
+            matches!(cmd, IpcCmd::Group(crate::groups::Request::Toggle { name }) if name == "work")
+        );
+        stream
+            .write_all(b"{\"status\":\"ok\",\"groups\":[]}\n")
+            .await
+            .unwrap();
+        assert!(client.await.unwrap().contains("groups"));
     }
 
     #[tokio::test]

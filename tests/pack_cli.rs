@@ -219,3 +219,28 @@ fn pack_validation_and_preview_support_echo() {
         "Zoë 🦀 — Engineer"
     );
 }
+
+#[test]
+fn personal_groups_do_not_control_pack_mirrors_or_bypass_reference_validation() {
+    let h = Harness::native();
+    write(
+        &h.config_home.join("snipexpand/config.yml"),
+        "snippet_groups: [{name: personal, match_files: [personal.yml], enabled: false}]",
+    );
+    write(
+        &h.config_home.join("snipexpand/match/personal.yml"),
+        "matches: [{trigger: ';personal', replace: mine}]",
+    );
+    h.success(&["pack", "install", h.repo.to_str().unwrap()]);
+    assert_eq!(h.success(&["render", ";pack"]), "old expansion");
+    h.success(&["group", "toggle", "personal"]);
+    h.success(&["pack", "disable", "test-pack"]);
+    assert_eq!(h.success(&["render", ";personal"]), "mine");
+    assert!(!h.run(&["render", ";pack"]).status.success());
+    h.success(&["pack", "enable", "test-pack"]);
+    write(&h.config_home.join("snipexpand/match/personal.yml"), "matches: [{trigger: ';personal', replace: '{{ref}}', vars: [{name: ref, type: match, params: {trigger: ';pack'}}]}]");
+    h.success(&["group", "disable", "personal"]);
+    // Even disabled personal snippets retain static reference validation.
+    assert!(!h.run(&["pack", "disable", "test-pack"]).status.success());
+    assert_eq!(h.success(&["render", ";pack"]), "old expansion");
+}

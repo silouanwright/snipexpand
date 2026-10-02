@@ -138,7 +138,7 @@ pub async fn run(config: Config) -> Result<()> {
     let mut expander = {
         let cfg = config.lock().unwrap();
         Expander::new_configured(
-            cfg.matches.clone(),
+            cfg.matches_for_profile(None),
             cfg.settings.trigger_mode,
             cfg.settings.terminator_chars(),
             cfg.settings.word_separator_chars(),
@@ -273,6 +273,22 @@ pub async fn run(config: Config) -> Result<()> {
                             Err(error) => format!("error: {}\n", format!("{error:#}").replace(['\r', '\n'], " ")),
                         };
                         let _ = stream.write_all(response.as_bytes()).await;
+                    }
+                    Ok((IpcCmd::Group(request), mut stream)) => {
+                        let response = {
+                            let mut current = config.lock().unwrap();
+                            match handle_group_request(&Config::dir(), &request, &mut current, &mut expander, &mut input) {
+                                Ok((response, effects)) => {
+                                    if let Some(effects) = effects { apply_config_effects(&current, &injector, effects); }
+                                    response
+                                }
+                                Err(error) => crate::groups::Response::Error { error: format!("{error:#}") },
+                            }
+                        };
+                        if let Ok(mut wire) = serde_json::to_vec(&response) {
+                            wire.push(b'\n');
+                            let _ = stream.write_all(&wire).await;
+                        }
                     }
                     Ok((IpcCmd::Status, mut stream)) => {
                         tracing::info!("Status requested via IPC");
@@ -543,14 +559,28 @@ fn wayland_text_characters(config: &Config) -> String {
     text
 }
 
+struct ConfigEffects {
+    backend_changed: bool,
+    text_characters: Option<String>,
+}
+
 /// Validate the entire candidate before changing any active matching state.
 fn reload_matching_config(
     dir: &std::path::Path,
     current: &mut Config,
     expander: &mut Expander,
     input: &mut InputState,
-) -> Result<(bool, Option<String>)> {
+) -> Result<ConfigEffects> {
     let new_cfg = Config::load_dir(dir)?;
+    Ok(install_matching_config(new_cfg, current, expander, input))
+}
+
+fn install_matching_config(
+    new_cfg: Config,
+    current: &mut Config,
+    expander: &mut Expander,
+    input: &mut InputState,
+) -> ConfigEffects {
     let backend_changed = new_cfg.settings.injection_backend != current.settings.injection_backend;
     let characters = wayland_text_characters(&new_cfg);
     let changed_characters = (characters != wayland_text_characters(current)).then_some(characters);
@@ -566,7 +596,10 @@ fn reload_matching_config(
     input.active_profile = None;
     input.profile_initialized = false;
     input.last_profile_check = None;
-    Ok((backend_changed, changed_characters))
+    ConfigEffects {
+        backend_changed,
+        text_characters: changed_characters,
+    }
 }
 
 fn reload_config(
@@ -576,21 +609,45 @@ fn reload_config(
     input: &mut InputState,
 ) -> Result<()> {
     let mut current = config.lock().unwrap();
-    let (backend_changed, changed_characters) =
-        reload_matching_config(&Config::dir(), &mut current, expander, input)?;
-    if backend_changed {
+    let effects = reload_matching_config(&Config::dir(), &mut current, expander, input)?;
+    apply_config_effects(&current, injector, effects);
+    Ok(())
+}
+
+fn apply_config_effects(current: &Config, injector: &Injector, effects: ConfigEffects) {
+    if effects.backend_changed {
         tracing::warn!("injection_backend changes require a daemon restart");
     }
     injector.set_delay_ms(current.settings.injection_delay_for(injector.backend()));
     injector.set_settle_ms(current.settings.injection_settle_ms);
-    if let Some(characters) = changed_characters {
+    if let Some(characters) = effects.text_characters {
         if let Err(error) = injector.refresh_wayland_text_keymap(characters) {
             tracing::warn!("Could not refresh the Wayland Unicode keymap: {}", error);
         }
     }
-    log_config_warnings(&current);
+    log_config_warnings(current);
     tracing::info!("Config reloaded");
-    Ok(())
+}
+
+fn handle_group_request(
+    dir: &std::path::Path,
+    request: &crate::groups::Request,
+    current: &mut Config,
+    expander: &mut Expander,
+    input: &mut InputState,
+) -> Result<(crate::groups::Response, Option<ConfigEffects>)> {
+    let effects = if matches!(request, crate::groups::Request::List) {
+        None
+    } else {
+        let candidate = crate::groups::change(dir, request)?;
+        Some(install_matching_config(candidate, current, expander, input))
+    };
+    Ok((
+        crate::groups::Response::Ok {
+            groups: crate::groups::entries(current),
+        },
+        effects,
+    ))
 }
 
 fn refresh_app_profile(
@@ -703,6 +760,169 @@ mod tests {
             vec![(trigger.to_string(), "expanded".to_string())],
             TriggerMode::Immediate,
         )
+    }
+
+    #[tokio::test]
+    async fn group_commands_cross_the_real_socket_and_persist_without_desktop_io() {
+        use crate::groups::{Request, Response};
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("config.yml"),
+            "snippet_groups: [{name: work, match_files: [work]}]",
+        )
+        .unwrap();
+        let socket = dir.path().join("daemon.sock");
+        let server = IpcServer::new(&socket).await.unwrap();
+        let mut current = Config::load_dir(dir.path()).unwrap();
+        let mut engine = Expander::new(current.matches_for_profile(None), TriggerMode::Immediate);
+        let mut input = InputState::default();
+        for (request, expected) in [
+            (Request::List, Some(true)),
+            (
+                Request::Disable {
+                    name: "work".into(),
+                },
+                Some(false),
+            ),
+            (
+                Request::Toggle {
+                    name: "work".into(),
+                },
+                Some(true),
+            ),
+            (
+                Request::Enable {
+                    name: "missing".into(),
+                },
+                None,
+            ),
+        ] {
+            let client_dir = dir.path().to_path_buf();
+            let client_socket = socket.clone();
+            let client = tokio::task::spawn_blocking(move || {
+                crate::groups::command(&client_dir, Some(&client_socket), &request)
+            });
+            let (command, mut stream) = server.accept().await.unwrap();
+            let IpcCmd::Group(request) = command else {
+                panic!("expected group request")
+            };
+            let response = match handle_group_request(
+                dir.path(),
+                &request,
+                &mut current,
+                &mut engine,
+                &mut input,
+            ) {
+                Ok((response, _)) => response,
+                Err(error) => Response::Error {
+                    error: format!("{error:#}"),
+                },
+            };
+            let wire = format!("{}\n", serde_json::to_string(&response).unwrap());
+            stream.write_all(wire.as_bytes()).await.unwrap();
+            let result = client.await.unwrap();
+            if let Some(enabled) = expected {
+                assert_eq!(result.unwrap()[0].enabled, enabled);
+                assert_eq!(crate::groups::entries(&current)[0].enabled, enabled);
+                assert_eq!(
+                    crate::groups::entries(&Config::load_dir(dir.path()).unwrap())[0].enabled,
+                    enabled
+                );
+            } else {
+                assert!(result
+                    .unwrap_err()
+                    .to_string()
+                    .contains("unknown snippet group"));
+            }
+        }
+    }
+
+    #[test]
+    fn group_ipc_handler_commits_and_cancels_input_only_on_success() {
+        use crate::groups::{Request, Response};
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir(dir.path().join("match")).unwrap();
+        std::fs::write(
+            dir.path().join("config.yml"),
+            "snippet_groups: [{name: work, match_files: [work.yml]}]",
+        )
+        .unwrap();
+        std::fs::write(
+            dir.path().join("match/work.yml"),
+            "matches: [{trigger: ab, replace: expanded}]",
+        )
+        .unwrap();
+        let mut current = Config::load_dir(dir.path()).unwrap();
+        let mut engine = Expander::new(current.matches_for_profile(None), TriggerMode::Immediate);
+        let mut input = InputState::default();
+        engine.push_char('a');
+        queue_expansion(&mut input, 48, engine.push_char('b').unwrap());
+        input.undo = Some(Undo {
+            replacement_len: 8,
+            original: "ab".into(),
+        });
+        engine.push_char('a');
+        let (_, effects) = handle_group_request(
+            dir.path(),
+            &Request::List,
+            &mut current,
+            &mut engine,
+            &mut input,
+        )
+        .unwrap();
+        assert!(effects.is_none());
+        assert!(input.pending_expansion.is_some());
+        // A persistence failure must not change the running candidate or input.
+        std::fs::create_dir(dir.path().join(".groups.lock")).unwrap();
+        assert!(handle_group_request(
+            dir.path(),
+            &Request::Disable {
+                name: "work".into()
+            },
+            &mut current,
+            &mut engine,
+            &mut input
+        )
+        .is_err());
+        assert!(input.pending_expansion.is_some());
+        assert_eq!(engine.push_char('b').unwrap().text, "expanded");
+        assert_eq!(current.matches_for_profile(None).len(), 1);
+        std::fs::rename(dir.path().join(".groups.lock"), dir.path().join("obstacle")).unwrap();
+        let (response, effects) = handle_group_request(
+            dir.path(),
+            &Request::Disable {
+                name: "work".into(),
+            },
+            &mut current,
+            &mut engine,
+            &mut input,
+        )
+        .unwrap();
+        assert!(matches!(response, Response::Ok { groups } if !groups[0].enabled));
+        assert!(effects.is_some());
+        assert!(input.pending_expansion.is_none());
+        assert!(input.undo.is_none());
+        assert!(engine.expansion_for_trigger("ab", None).unwrap().is_none());
+        assert!(current.matches_for_profile(None).is_empty());
+        assert!(Config::load_dir(dir.path())
+            .unwrap()
+            .matches_for_profile(None)
+            .is_empty());
+        handle_group_request(
+            dir.path(),
+            &Request::Toggle {
+                name: "work".into(),
+            },
+            &mut current,
+            &mut engine,
+            &mut input,
+        )
+        .unwrap();
+        // Enabling does not complete a partial trigger from before the transition.
+        assert!(engine.push_char('b').is_none());
+        engine.push_char('a');
+        assert_eq!(engine.push_char('b').unwrap().text, "expanded");
+        assert!(engine.expansion_for_trigger("ab", None).unwrap().is_some());
     }
 
     #[test]

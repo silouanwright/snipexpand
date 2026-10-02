@@ -101,3 +101,30 @@ that rejection is visible to the caller. No real daemon or config was used.
 
 After rollback/reload changes: 111 tests passed (90 unit, 15 authoring CLI,
 6 pack CLI), Clippy with warnings denied, formatting, and CLI help passed.
+
+## Personal groups — final batch
+
+125 tests pass: 95 unit, 15 authoring CLI, 8 group CLI, and 7 pack CLI.
+Group coverage includes defaults and overlapping membership, YAML preservation,
+root-relative paths, transitive references, profile intersection, pack isolation,
+duplicate disambiguation, unknown preferences and later restored definitions,
+malformed state, 12 concurrent offline toggles, failed lock/atomic replacement,
+and lost responses without a second toggle. Tests exercise the real Unix socket
+parser/client and daemon mutation handler without initializing desktop input.
+
+`cargo fmt --check`, `cargo clippy --locked --all-targets -- -D warnings`, and
+`cargo test --locked` pass. A fresh target directory also passed the full suite,
+CLI help (including `group --help`), and package verification. Final package
+verification after help/test refinements passed with:
+
+```sh
+CARGO_TARGET_DIR="$PWD/target/package-verification" \
+  TMPDIR="$PWD/target/test-tmp" cargo package --locked --allow-dirty
+```
+
+Keep package verification in a separate target directory. This session found
+that a previous package build had left the default Cargo executable/fingerprint
+pointing at an older unpacked source tree: tests compiled current source while
+`cargo run` chose that old executable. A fresh target proved current code; the
+stale default `target/debug` was moved to recoverable desktop Trash and rebuilt.
+This affected local build artifacts only, not the installed daemon.

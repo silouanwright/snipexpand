@@ -80,6 +80,9 @@ values, declare the reference explicitly inside `params.echo`.
 - One expansion: at most 4,096 match/variable evaluations and 1 MiB of cumulative
   generated UTF-8 text, including intermediate values and repeated insertions.
 
+These budgets cover variable/template rendering; typed-case transformation and
+cursor handling happen afterwards.
+
 `check` validates graph structure and static limits; runtime and `render` enforce
 the cumulative budgets. A large branching graph may therefore pass `check` and
 fail `render`. Preview writes no replacement on failure. Automatic expansion

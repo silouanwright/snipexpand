@@ -46,11 +46,11 @@ the Cargo package, so schema export works offline.
 
 - Supported keys, value types, trigger alternatives, and numeric settings ranges.
 - Date, nested-match, and echo parameter shapes, including `tz` and `inject_vars`.
-- Required profile filters and case-propagation settings.
+- Required profile filters, personal group fields, and case-propagation settings.
 
 Run `snipexpand check` for semantic validation: valid date formats and ranges,
 known timezone names, variable names, regex syntax, duplicate variable names,
-profile paths, dependency depth, and echo/nested-reference cycles or missing targets. The editor does
+profile/group paths, unique group names, dependency depth, and echo/nested-reference cycles or missing targets. The editor does
 not have the complete loaded configuration or the runtime timezone database.
 Schema success alone does not prove a snippet can expand in an application.
 

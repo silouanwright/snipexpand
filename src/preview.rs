@@ -65,7 +65,7 @@ pub fn render(
         selected.push(item);
     }
     if selected.is_empty() {
-        bail!("literal trigger '{trigger}' not found in the selected source/profile; render does not evaluate regex triggers");
+        bail!("literal trigger '{trigger}' not found in the active groups/selected source/profile; render does not evaluate regex triggers");
     }
     if selected.len() != 1 {
         bail!(

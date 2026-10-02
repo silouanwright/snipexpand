@@ -1,7 +1,7 @@
 ---
 name: snipexpand-shortcuts
 description: Add, remove, inspect, validate, and organize SnipExpand text-expansion shortcuts.
-version: 2.2.0
+version: 2.3.0
 ---
 
 # SnipExpand shortcuts
@@ -86,11 +86,34 @@ Use preview to verify rendered text without changing focus, typing, or writing
 to the clipboard. Plain output has no added newline. JSON includes source and
 cursor offsets measured in Unicode characters. Select an exact literal trigger;
 regex matching and typed-case behavior are not simulated. Profiles are selected
-explicitly by name; omitted means all configured matches.
+explicitly by name; omitted applies group selection without an app profile.
+Preview and paste cannot bypass disabled groups, even with `--source`.
 
 `check`, `render`, and `schema` do not initialize or modify configuration.
 `snipexpand schema config` and `snipexpand schema match` print editor schemas;
 export them to JSON files and associate them through YAML Language Server.
+
+## Personal groups and reusable values
+
+Define `snippet_groups` in settings using entries such as
+`{name: work, match_files: [work, signatures.yml], enabled: true}`. Paths refer
+to personal files or directory subtrees under `match/`; `packs/` is excluded.
+Use `snipexpand group list --json`, `group enable NAME`, `group disable NAME`,
+and `group toggle NAME` to manage persistent preferences without rewriting YAML.
+The daemon applies changes when reachable; otherwise they take effect on start.
+Never blindly retry a toggle after a lost response: inspect its state first.
+
+All groups owning a snippet must be enabled. App profiles can further restrict
+selection. Nested dependents become inactive when a target is filtered out.
+`list --json` includes `groups` and `available`, including disabled entries.
+These availability counts do not simulate the active app or global pause state.
+
+Echo values use `type: echo` with `params: {echo: 'text or {{another}}'}`.
+Dependencies are resolved regardless of declaration order; inserted values are
+not reparsed. Missing echo references and cycles fail `check`. `inject_vars:
+false` preserves a literal parameter. Date/match parameter interpolation is not
+supported. Rendering permits 64-node dependency/nested chains, 4096 evaluations,
+and 1 MiB cumulative generated UTF-8 text; use `render` to check output budgets.
 
 ## Snippet packs
 
@@ -169,10 +192,12 @@ Supported match fields:
 - `word`, `left_word`, and `right_word`
 - `propagate_case`
 - `uppercase_style`: `uppercase`, `capitalize`, or `capitalize_words`
-- match-local `vars` and file-level `global_vars` of type `date` or `match`
+- match-local `vars` and file-level `global_vars` of type `date`, `echo`, or `match`
 - date `params.format`, signed elapsed `params.offset` in seconds, and optional
   `params.tz` using an IANA name such as `UTC` or `America/Chicago`
 - nested-match `params.trigger`, with cycles rejected during validation
+- echo `params.echo`, dependencies on variables/captures, `inject_vars: false`,
+  and escaped opening braces (`\{\{` in single-quoted YAML)
 
 Unknown timezones, invalid date formats, out-of-range offsets, and parameters
 belonging to another variable type are rejected by `check`. Omit `tz` for system
@@ -182,7 +207,7 @@ including nested snippets, use one instant.
 The first `$|$` in a replacement sets the final cursor position.
 
 Duplicate triggers are allowed for picker workflows. Typed expansion requires
-an app profile to leave only one active match. Use the exact `source` from
+group/profile selection to leave only one active match. Use the exact `source` from
 `snipexpand list --json` with `snipexpand paste --source PATH TRIGGER` to choose
 a duplicate explicitly.
 
@@ -202,7 +227,7 @@ terminators: [space]      # space, enter, and/or tab
 - `word` requires both left and right word boundaries.
 - `left_word` and `right_word` require only their corresponding boundary.
 - Duplicate triggers are allowed for picker selection but require an app
-  profile to leave one active match for typed expansion. Prefix-related
+  profile or group selection to leave one active match for typed expansion. Prefix-related
   triggers are supported and resolved deterministically.
 
 ## Application exclusions

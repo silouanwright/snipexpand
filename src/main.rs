@@ -3,6 +3,7 @@ mod config;
 mod daemon;
 mod date;
 mod expander;
+mod groups;
 mod injector;
 mod ipc;
 mod keyboard;
@@ -52,7 +53,7 @@ enum Cmd {
         /// Match file path, absolute or relative to the current directory
         #[arg(long)]
         source: Option<std::path::PathBuf>,
-        /// Explicit app profile name; omitted means the unfiltered configuration
+        /// Explicit app profile name; omitted applies group selection without an app profile
         #[arg(long)]
         profile: Option<String>,
         /// Include source and Unicode character cursor offsets as JSON
@@ -104,6 +105,11 @@ enum Cmd {
     },
     /// Stop and remove the user service while preserving configuration
     Uninstall,
+    /// Manage persistent personal snippet groups
+    Group {
+        #[command(subcommand)]
+        command: GroupCmd,
+    },
     /// Install and manage Git-published snippet packs
     Pack {
         #[command(subcommand)]
@@ -115,6 +121,21 @@ enum Cmd {
 enum SchemaKind {
     Config,
     Match,
+}
+
+#[derive(Subcommand)]
+enum GroupCmd {
+    /// List collection preferences and available member counts
+    List {
+        #[arg(long)]
+        json: bool,
+    },
+    /// Enable a configured personal collection persistently
+    Enable { name: String },
+    /// Disable a configured personal collection persistently
+    Disable { name: String },
+    /// Toggle a configured personal collection persistently
+    Toggle { name: String },
 }
 
 #[derive(Subcommand)]
@@ -166,7 +187,7 @@ fn main() -> anyhow::Result<()> {
     }
     if !matches!(
         cli.command,
-        Some(Cmd::Render { .. } | Cmd::Schema { .. } | Cmd::Check)
+        Some(Cmd::Render { .. } | Cmd::Schema { .. } | Cmd::Check | Cmd::Group { .. })
     ) {
         ensure_config()?;
     }
@@ -188,6 +209,31 @@ fn main() -> anyhow::Result<()> {
 fn handle_cmd(cmd: Cmd) -> anyhow::Result<()> {
     match cmd {
         Cmd::Init => init_config()?,
+        Cmd::Group { command } => {
+            let (request, json) = match command {
+                GroupCmd::List { json } => (groups::Request::List, json),
+                GroupCmd::Enable { name } => (groups::Request::Enable { name }, false),
+                GroupCmd::Disable { name } => (groups::Request::Disable { name }, false),
+                GroupCmd::Toggle { name } => (groups::Request::Toggle { name }, false),
+            };
+            let socket = ipc::socket_path().ok();
+            let entries = groups::command(&config::Config::dir(), socket.as_deref(), &request)?;
+            if json {
+                println!("{}", serde_json::to_string(&entries)?);
+            } else if entries.is_empty() {
+                println!("No personal groups configured.");
+            } else {
+                for entry in entries {
+                    println!(
+                        "{}: {} ({} of {} members available)",
+                        entry.name,
+                        if entry.enabled { "enabled" } else { "disabled" },
+                        entry.available,
+                        entry.members
+                    );
+                }
+            }
+        }
         Cmd::List { json } => {
             let cfg = config::Config::load_default()?;
             let rows = list_entries(&cfg);
@@ -490,6 +536,8 @@ struct ListEntry {
     source: String,
     generated: bool,
     editable: bool,
+    available: bool,
+    groups: Vec<String>,
 }
 
 fn is_false(value: &bool) -> bool {
@@ -498,10 +546,13 @@ fn is_false(value: &bool) -> bool {
 
 fn list_entries(config: &config::Config) -> Vec<ListEntry> {
     let generated_path = config::Config::generated_path();
+    let active = config.active_match_indices(None);
     let mut rows = config
         .matches
         .iter()
-        .flat_map(|item| {
+        .enumerate()
+        .flat_map(|(index, item)| {
+            let available = active.contains(&index);
             let generated = item.source == generated_path;
             item.triggers
                 .iter()
@@ -516,6 +567,8 @@ fn list_entries(config: &config::Config) -> Vec<ListEntry> {
                     source: item.source.display().to_string(),
                     generated,
                     editable: generated,
+                    available,
+                    groups: config.groups_for_source(&item.source),
                 })
         })
         .collect::<Vec<_>>();

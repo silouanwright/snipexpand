@@ -1,11 +1,12 @@
 # Personal groups — implementation contract
 
-Status: design for the unfinished part of the active 2026-10-02 goal. This is
-not a claim that group commands already exist. Continue on `codex/snippet-authoring`.
+Implemented on `codex/snippet-authoring`; not published in v0.4.1. These controls
+manage personal collections through configuration, CLI, and IPC. Plugin buttons
+remain a separate follow-up.
 
 ## Configuration and selection
 
-Proposed settings syntax:
+Add to `config.yml`:
 
 ```yaml
 snippet_groups:
@@ -17,7 +18,8 @@ snippet_groups:
     enabled: false
 ```
 
-Names are unique and stable, with letters, numbers, `_`, and `-`. Paths are
+Names are unique, case-sensitive ASCII identifiers using letters, numbers, `_`,
+and `-`. Paths are
 relative to `match/`, refer to a file or directory subtree, and cannot be empty,
 absolute, contain `..`, or select `packs/`. Reject invalid paths/names and empty
 membership lists. Paths may be temporarily absent so adding a new personal file
@@ -33,9 +35,9 @@ group. After filtering, remove snippets whose nested-match targets are inactive,
 transitively. Disabling one group therefore never makes the whole configuration
 invalid just because another snippet references it. Enabling restores those
 snippets when all dependencies are available. Static missing/cyclic/ambiguous
-references still fail validation, including in disabled groups. The existing
-profile-reference policy may be made consistent with this rule if documented
-and covered by regression tests.
+references still fail validation, including in disabled groups. Profile-excluded
+references now follow the same suppression rule; earlier versions rejected the
+entire configuration in this situation.
 
 Automatic matching, explicit paste, and offline render use this same selection.
 Source selection cannot bypass disabled groups. Plain duplicate triggers remain
@@ -51,17 +53,18 @@ validation behavior: pack disable must not silently break the configuration.
 
 - `group list [--json]`
 - `group enable NAME`, `group disable NAME`, `group toggle NAME`
-- Prefer corresponding daemon IPC operations while running. If no daemon can be
+- The CLI uses corresponding daemon IPC operations while running. If no daemon can be
   connected, apply the same persistence transition offline.
 - Never retry a toggle offline after a request may have reached the daemon:
   a lost response must not cause a second toggle.
 - JSON IPC uses an explicit operation and name, with structured response data;
   handle errors without terminating the daemon.
 
-Keep user YAML and comments intact. Store overrides in a separate versioned
+Commands keep user YAML and comments intact. Overrides are stored in a separate versioned
 `groups.json` under the configuration directory, with atomic same-directory
 replacement and an exclusive lock around read/modify/write. Defaults come from
-`config.yml`; an override wins. Ignore unknown saved names for selection but
+`config.yml`; an override wins. To return to a YAML default, remove that name
+from `groups.json` while the daemon is stopped, or set the same value explicitly. Ignore unknown saved names for selection but
 preserve them so a temporarily removed definition can recover its prior state.
 Invalid state files fail validation instead of silently resetting preferences.
 
@@ -72,12 +75,48 @@ different candidate. Cancel partial input, pending expansion, and undo on a
 successful transition. The recent reload helper provides a seam for these tests.
 Concurrent offline toggles should serialize through the lock.
 
-`group list` should identify group name, enabled state/default, membership paths,
-and member counts. Existing `list` is a configuration inventory, so keep disabled
-snippets visible and expose enough metadata for later plugin controls. Document
-whether counts include nested snippets suppressed by dependencies or profiles.
+`group list --json` returns `name`, `enabled`, `default_enabled`, `overridden`,
+`match_files`, `members`, and `available`. `members` counts configured match
+definitions in that group (not trigger aliases). `available` counts members left
+after all group and dependency filters, without an app profile. It does not
+promise that a trigger is unambiguous or reachable, or that expansion is globally
+enabled. While running, listing reports the daemon's loaded state; otherwise it
+loads disk configuration. A failed config reload leaves the daemon listing its
+last valid state; `check` diagnoses the disk error.
 
-## Required verification
+`list --json` remains a complete inventory, including disabled snippets. It adds
+`groups` and `available` with the same no-profile selection rule. Existing status
+`match_groups` counts snippet definitions, not these named personal collections.
+
+Example commands:
+
+```sh
+snipexpand check
+snipexpand group list --json
+snipexpand group disable work
+snipexpand group enable greek
+snipexpand group toggle work
+snipexpand render ';signature'
+```
+
+Group commands do not create starter YAML or install/update the bundled skill.
+An unknown group is an error. A daemon too old to support group IPC returns an
+error; the client does not fall back after connecting. Upgrade/restart it before
+using these commands. A timeout or lost response may mean the change committed:
+inspect `group list` before repeating a toggle.
+
+Wire protocol (one JSON request/response per line):
+
+```text
+group<TAB>{"operation":"toggle","name":"work"}
+{"status":"ok","groups":[...]}
+```
+
+Other operations are `list` (no name), `enable`, and `disable`. Failures use
+`{"status":"error","error":"message"}`. The settings and override file are
+SnipExpand-specific, not Espanso configuration keys.
+
+## Verification coverage
 
 - Config/schema parity for supported fields; invalid names/paths and duplicates.
 - Default state, persistent enable/disable/toggle, restart/load behavior, stale
@@ -89,5 +128,5 @@ whether counts include nested snippets suppressed by dependencies or profiles.
 - Config reload and group changes clear pending input; failed changes preserve
   last valid matching state.
 - README, schemas, compatibility/pack documentation, TASKS, and checkpoint.
-- Full fmt/Clippy/tests/help, final diff, local reviewable commit(s). No publish,
-  install, or live input. Plugin UI remains a separate later task.
+- Full fmt/Clippy/tests/help, package verification, and final diff. No publish,
+  install, or live input. See the completion audit for command results.
