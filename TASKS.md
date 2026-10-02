@@ -17,23 +17,24 @@ is separate from the unfinished Unicode/Fcitx5 work and is not yet released.
 - [x] Add explicit IANA date timezones, with fixed-clock tests for UTC, calendar
   boundaries, both DST transitions, and positive/negative elapsed offsets.
 - [x] Add bounded echo support in the next batch.
-- [ ] Finish named personal groups in the active next batch.
+- [x] Finish named personal groups in the next batch.
 - [ ] Validate live application delivery as part of the existing P0 matrix.
 
-## Active batch — 2026-10-02
+## Completed batch — 2026-10-02
 
 See [the next-work plan](docs/next-work-2026-10-02.md) for scope and acceptance.
 The authoring batch is committed as `fc90d52`; it is not released.
-Current progress and local commits: [reliability/echo checkpoint](docs/checkpoint-reliability-2026-10-02.md).
+Completion audit and local commits: [completed authoring batch](docs/completion-authoring-batch-2026-10-02.md).
 
 - [x] Build generated matcher tests with an independent reference model; fix
   reproduced defects and retain minimal regression cases.
 - [x] Extend coverage to nested-variable graphs, schema/parser agreement, and
   failed pack/reload operations under isolated filesystem tests.
 - [x] Add bounded echo variables with explicit dependency and escaping semantics.
-- [ ] Add named personal groups after defining profile/pack precedence.
+- [x] Add named personal groups with persistent CLI/IPC controls and defined
+  profile/pack/reference behavior.
 
-This active batch uses extra compute to explore new cases without live desktop
+This completed batch used extra compute to explore new cases without live desktop
 input. Existing application compatibility work remains open. The docs index
 is [docs/README.md](docs/README.md).
 

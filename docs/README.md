@@ -10,8 +10,11 @@
 
 ## Current work — 2026-10-02
 
-- [Reliability/echo checkpoint](checkpoint-reliability-2026-10-02.md): 111 passing
-  tests, local commits, and the remaining [group contract](group-contract.md).
+- [Completed batch and audit](completion-authoring-batch-2026-10-02.md): 125 passing
+  tests, local commits, verification, and later work.
+- [Personal groups](group-contract.md): configuration, persistence, and IPC.
+- [Interim reliability/echo checkpoint](checkpoint-reliability-2026-10-02.md):
+  historical progress before groups were implemented.
 
 - [Authoring checkpoint](checkpoint-authoring-2026-10-01.md): completed local
   commit `fc90d52`, 89 passing tests, scope, and release limitations.

@@ -1,6 +1,11 @@
 # Reliability and echo checkpoint — 2026-10-02
 
-## Active goal status
+## Historical checkpoint
+
+Superseded by [the completion audit](completion-authoring-batch-2026-10-02.md).
+The remaining groups work described below is now complete.
+
+## Goal status at this checkpoint
 
 The goal is still active. Generated reliability tests, reproduced fixes, and
 bounded echo variables are done. Named personal groups are not implemented yet.

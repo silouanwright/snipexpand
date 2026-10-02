@@ -13,6 +13,8 @@ The architectural comparison below is historical. Current delivery status:
 - Commit `fc90d52` on `codex/snippet-authoring` adds offline preview, stronger
   validation, editor schemas/export, and date timezones. It passed 89 tests,
   clippy, formatting, and package verification; it is not pushed or released.
+- The next authoring batch is complete locally, including reliability fixes, echo,
+  and personal groups; see [the completion audit](completion-authoring-batch-2026-10-02.md).
 - Unicode/Fcitx5 compatibility remains a separate unfinished workstream.
 
 See [the documentation index](README.md) for implementation/research records and
@@ -61,13 +63,14 @@ Implemented on the local authoring branch, awaiting integration/release:
 | Date hardening and timezones | Checked formats/offsets, IANA zones, one instant per nested expansion |
 | YAML editor support | Settings/match schemas, binary export, schema/parser fixtures |
 | Echo variables | Bounded single-pass rendering, dependency validation, escaping, and globals/local overrides |
-| Generated reliability tests | Unicode matcher, graphs/schema output, pack rollback, and reload regressions; 111 tests now pass |
+| Generated reliability tests | Unicode matcher, graphs/schema output, pack rollback, and reload regressions; 125 tests now pass |
+| Named personal groups | File/subtree membership, persistent CLI/IPC controls, profile intersection and dependency filtering |
 
 ## Consider next
 
 | Capability | Decision pressure |
 | --- | --- |
-| Named snippet groups | Useful organization and quick control once real configurations become difficult to manage |
+| Plugin group controls | Use the completed CLI/IPC and inventory metadata for collection buttons |
 | Clipboard backend for long text | Faster long replacements, but clipboard preservation and password-manager behavior need careful design |
 
 Espanso migration is intentionally deferred until SnipExpand's desired
