@@ -1,3 +1,4 @@
+use anyhow::{Context, Result};
 use std::collections::{HashMap, VecDeque};
 
 use crate::config::{Match, TriggerMode, UppercaseStyle, VariableKind};
@@ -209,7 +210,14 @@ impl Expander {
                 }
                 let delete_count = typed_trigger.chars().count() + terminator_count;
                 let rendered = apply_propagated_case(
-                    render(&self.matches, item, &captures),
+                    match render(&self.matches, item, &captures, chrono::Utc::now()) {
+                        Ok(text) => text,
+                        Err(error) => {
+                            tracing::warn!("Snippet rendering failed: {error:#}");
+                            self.buffer.clear();
+                            return None;
+                        }
+                    },
                     item,
                     &typed_trigger,
                 );
@@ -250,8 +258,18 @@ impl Expander {
             ) {
                 continue;
             }
-            let rendered =
-                apply_propagated_case(render(&self.matches, item, &captures), item, &typed_trigger);
+            let rendered = apply_propagated_case(
+                match render(&self.matches, item, &captures, chrono::Utc::now()) {
+                    Ok(text) => text,
+                    Err(error) => {
+                        tracing::warn!("Snippet rendering failed: {error:#}");
+                        self.buffer.clear();
+                        return None;
+                    }
+                },
+                item,
+                &typed_trigger,
+            );
             let replacement = format!("{}{}", rendered, separator);
             let (text, cursor_back) = prepare_replacement(&replacement);
             self.buffer.clear();
@@ -273,20 +291,30 @@ impl Expander {
         self.buffer.clear();
     }
 
-    pub fn expansion_for_trigger(&self, trigger: &str, source: Option<&str>) -> Option<Expansion> {
-        let item = self.matches.iter().find(|item| {
+    pub fn expansion_for_trigger(
+        &self,
+        trigger: &str,
+        source: Option<&str>,
+    ) -> Result<Option<Expansion>> {
+        let Some(item) = self.matches.iter().find(|item| {
             item.regex.is_none()
                 && item.trigger == trigger
                 && source.is_none_or(|source| item.source.to_string_lossy() == source)
-        })?;
-        let (text, cursor_back) =
-            prepare_replacement(&render(&self.matches, item, &HashMap::new()));
-        Some(Expansion {
+        }) else {
+            return Ok(None);
+        };
+        let (text, cursor_back) = prepare_replacement(&render(
+            &self.matches,
+            item,
+            &HashMap::new(),
+            chrono::Utc::now(),
+        )?);
+        Ok(Some(Expansion {
             delete_count: 0,
             text,
             cursor_back,
             undo_text: String::new(),
-        })
+        }))
     }
 
     pub fn trigger_is_ambiguous(&self, trigger: &str) -> bool {
@@ -424,31 +452,27 @@ fn render(
     matches: &[CompiledMatch],
     item: &CompiledMatch,
     captures: &HashMap<String, String>,
-) -> String {
+    now: chrono::DateTime<chrono::Utc>,
+) -> Result<String> {
     let mut result = item.replace.clone();
     for variable in &item.vars {
         let value = match variable.kind {
-            VariableKind::Date => {
-                let now = chrono::Local::now() + chrono::Duration::seconds(variable.params.offset);
-                let format = if variable.params.format.is_empty() {
-                    "%Y-%m-%d"
-                } else {
-                    &variable.params.format
-                };
-                now.format(format).to_string()
+            VariableKind::Date => crate::date::render(&variable.params, now),
+            VariableKind::Match => {
+                let candidate = matches
+                    .iter()
+                    .find(|candidate| candidate.trigger == variable.params.trigger())
+                    .context("nested match reference is missing")?;
+                render(matches, candidate, &HashMap::new(), now)
             }
-            VariableKind::Match => matches
-                .iter()
-                .find(|candidate| candidate.trigger == variable.params.trigger)
-                .map(|candidate| render(matches, candidate, &HashMap::new()))
-                .expect("nested match references were validated"),
-        };
+        }
+        .with_context(|| format!("{}: variable '{}'", item.source.display(), variable.name))?;
         result = result.replace(&format!("{{{{{}}}}}", variable.name), &value);
     }
     for (name, value) in captures {
         result = result.replace(&format!("{{{{{name}}}}}"), value);
     }
-    result
+    Ok(result)
 }
 
 fn prepare_replacement(replacement: &str) -> (String, usize) {
@@ -510,7 +534,7 @@ mod tests {
             TriggerMode::Immediate,
         );
         assert_eq!(
-            e.expansion_for_trigger(";bold", None),
+            e.expansion_for_trigger(";bold", None).unwrap(),
             Some(Expansion {
                 delete_count: 0,
                 text: "****".to_string(),
@@ -906,9 +930,8 @@ mod tests {
             name: "current_year".to_string(),
             kind: VariableKind::Date,
             params: crate::config::VariableParams {
-                format: "%Y".to_string(),
-                offset: 0,
-                trigger: String::new(),
+                format: Some("%Y".to_string()),
+                ..Default::default()
             },
         });
         let mut e = Expander::new(vec![item], TriggerMode::Immediate);
@@ -930,7 +953,7 @@ mod tests {
             name: "person".into(),
             kind: VariableKind::Match,
             params: crate::config::VariableParams {
-                trigger: ";name".into(),
+                trigger: Some(";name".into()),
                 ..Default::default()
             },
         });
@@ -976,6 +999,7 @@ mod tests {
             expander
                 .expansion_for_trigger(";same", Some("second.yml"))
                 .unwrap()
+                .unwrap()
                 .text,
             "second"
         );
@@ -1000,5 +1024,69 @@ mod tests {
         // The actual result depends on iteration order (first-match-wins).
         // We just assert one of them fires and no panic occurs.
         assert!(any_fired);
+    }
+
+    #[test]
+    fn render_failure_does_not_emit_an_expansion_and_resets_input() {
+        for word in [false, true] {
+            let mut item = structured_match(";bad", "{{date}}");
+            item.word = word;
+            item.vars.push(crate::config::Variable {
+                name: "date".into(),
+                kind: VariableKind::Date,
+                params: crate::config::VariableParams {
+                    offset: Some(i64::MAX),
+                    ..Default::default()
+                },
+            });
+            let mut expander = Expander::new(vec![item], TriggerMode::Immediate);
+            for c in ";bad ".chars() {
+                assert!(expander.push_char(c).is_none());
+            }
+            assert!(expander.expansion_for_trigger(";bad", None).is_err());
+            // The literal trigger itself reaches the failure path without word boundaries.
+            if word {
+                assert!(expander.buffer.is_empty());
+            }
+        }
+    }
+
+    #[test]
+    fn nested_date_variables_share_one_render_instant() {
+        let now = chrono::DateTime::parse_from_rfc3339("2026-12-31T23:59:59.999999999Z")
+            .unwrap()
+            .with_timezone(&chrono::Utc);
+        let date = crate::config::Variable {
+            name: "stamp".into(),
+            kind: VariableKind::Date,
+            params: crate::config::VariableParams {
+                format: Some("%Y-%m-%dT%H:%M:%S%.9fZ".into()),
+                tz: Some("UTC".into()),
+                ..Default::default()
+            },
+        };
+        let mut child = structured_match(";child", "{{stamp}}");
+        child.vars.push(date.clone());
+        let mut parent = structured_match(";parent", "{{stamp}} {{nested}}");
+        parent.vars = vec![
+            date,
+            crate::config::Variable {
+                name: "nested".into(),
+                kind: VariableKind::Match,
+                params: crate::config::VariableParams {
+                    trigger: Some(";child".into()),
+                    ..Default::default()
+                },
+            },
+        ];
+        let compiled = compile_matches(vec![parent, child]);
+        let item = compiled
+            .iter()
+            .find(|item| item.trigger == ";parent")
+            .unwrap();
+        assert_eq!(
+            render(&compiled, item, &HashMap::new(), now).unwrap(),
+            "2026-12-31T23:59:59.999999999Z 2026-12-31T23:59:59.999999999Z"
+        );
     }
 }

@@ -1,0 +1,30 @@
+name: Authoring fixtures
+parent: default
+global_vars:
+  - name: year
+    type: date
+    params: {format: '%Y', tz: UTC}
+matches:
+  - triggers: [';greet', ';hello']
+    label: Greeting
+    search_terms: [welcome]
+    word: true
+    left_word: true
+    right_word: true
+    propagate_case: true
+    uppercase_style: capitalize_words
+    replace: "Hello {{name}} $|$🙂\n{{year}}"
+    vars:
+      - name: name
+        type: match
+        params: {trigger: ';name'}
+  - trigger: ';name'
+    replace: World
+  - regex: 'issue-(?P<number>[0-9]+)'
+    replace: 'Issue #{{number}}'
+  - trigger: ';utc'
+    replace: '{{stamp}}'
+    vars:
+      - name: stamp
+        type: date
+        params: {format: '%Y-%m-%dT%H:%M:%SZ', offset: 0, tz: UTC}

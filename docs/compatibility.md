@@ -22,7 +22,8 @@ than silently changing their behavior.
 | `global_vars` | Core | Date and nested-match variables applied to every match in the file |
 | match `vars` | Core | Date and nested-match variables applied after global variables |
 | date `format` | Full | Chrono/strftime formatting |
-| date `offset` | Full | Signed offset in seconds |
+| date `offset` | Full | Signed elapsed seconds, checked for overflow |
+| date `tz` | Core | IANA timezone names; invalid names are errors rather than Espanso's local-time fallback |
 | nested `match` variable | Full | References another trigger; missing references and cycles are rejected |
 | Multiple files | Full | Recursive `.yml` and `.yaml` discovery |
 | `regex` | Core | Suffix matching with named captures exposed as `{{name}}`; bounded by `regex_max_buffer` |
@@ -64,6 +65,7 @@ listed matching and timing settings. The first matching profile wins.
 
 ## Unsupported and rejected
 
+- Date `locale` overrides and variable injection inside parameter values
 - Shell, script, clipboard, random, echo, choice, and form variables
 - Forms, images, HTML, and Markdown effects
 - Imports and anchors
@@ -85,3 +87,19 @@ text can differ from the raw keys observed by SnipExpand.
 
 In immediate mode, `snipexpand check` warns when a shorter trigger makes a
 longer trigger unreachable.
+
+
+## Offline authoring tools
+
+`render` evaluates exact literal triggers (including nested and date variables)
+without daemon IPC, keyboard input, or clipboard writes. It uses explicit source
+and profile selection rather than active-window detection. It previews `paste`
+behavior; it does not simulate word boundaries, typed case, or regex matching.
+`schema config` and `schema match` export the supported YAML shapes for editors.
+See [the editor guide](../schemas/README.md). Neither schemas nor preview replace
+live application compatibility testing.
+
+Date and nested-match variables reject irrelevant parameters. Date formats,
+known timezones, and representable offset results are checked during loading;
+runtime rendering also returns errors if the clock or result becomes invalid.
+All dates in a single expansion use the same instant, including nested matches.

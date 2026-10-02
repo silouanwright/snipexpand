@@ -318,12 +318,48 @@ pub enum VariableKind {
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct VariableParams {
-    #[serde(default)]
-    pub format: String,
-    #[serde(default)]
-    pub offset: i64,
-    #[serde(default)]
-    pub trigger: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub format: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub offset: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub trigger: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tz: Option<String>,
+}
+
+impl VariableParams {
+    pub fn trigger(&self) -> &str {
+        self.trigger.as_deref().unwrap_or_default()
+    }
+}
+
+impl Variable {
+    fn validate(&self) -> Result<()> {
+        if self.name.is_empty() || !self.name.chars().all(|c| c.is_alphanumeric() || c == '_') {
+            bail!("variable name must contain only letters, numbers, or underscores");
+        }
+        match self.kind {
+            VariableKind::Date => {
+                if self.params.trigger.is_some() {
+                    bail!("date variables do not accept params.trigger");
+                }
+                crate::date::validate(&self.params)?;
+            }
+            VariableKind::Match => {
+                if self.params.trigger().is_empty() {
+                    bail!("match variable '{}' requires params.trigger", self.name);
+                }
+                if self.params.format.is_some()
+                    || self.params.offset.is_some()
+                    || self.params.tz.is_some()
+                {
+                    bail!("match variables only accept params.trigger");
+                }
+            }
+        }
+        Ok(())
+    }
 }
 
 #[derive(Debug, Clone, Default)]
@@ -465,7 +501,17 @@ impl Config {
                 path.display()
             );
         }
+        for variable in &file.global_vars {
+            variable.validate().with_context(|| {
+                format!("{}: global variable '{}'", path.display(), variable.name)
+            })?;
+        }
         for definition in file.matches {
+            for variable in &definition.vars {
+                variable
+                    .validate()
+                    .with_context(|| format!("{}: variable '{}'", path.display(), variable.name))?;
+            }
             let triggers = definition.normalized_triggers(path)?;
             let vars = merge_variables(path, &file.global_vars, &definition.vars)?;
             self.matches.push(Match {
@@ -550,13 +596,9 @@ impl Config {
                         var.name
                     );
                 }
-                if var.kind == VariableKind::Match && var.params.trigger.is_empty() {
-                    bail!(
-                        "{}: match variable '{}' requires params.trigger",
-                        item.source.display(),
-                        var.name
-                    );
-                }
+                var.validate().with_context(|| {
+                    format!("{}: variable '{}'", item.source.display(), var.name)
+                })?;
             }
         }
         self.validate_match_references()?;
@@ -569,9 +611,13 @@ impl Config {
             .matches
             .iter()
             .enumerate()
-            .flat_map(|(index, item)| item.triggers.iter().map(move |trigger| (trigger, index)))
+            .flat_map(|(index, item)| {
+                item.triggers
+                    .iter()
+                    .map(move |trigger| (trigger.as_str(), index))
+            })
             .fold(
-                HashMap::<&String, Vec<usize>>::new(),
+                HashMap::<&str, Vec<usize>>::new(),
                 |mut map, (trigger, index)| {
                     map.entry(trigger).or_default().push(index);
                     map
@@ -600,13 +646,18 @@ impl Config {
                     let target = self
                         .matches
                         .iter()
-                        .find(|candidate| candidate.triggers.contains(&variable.params.trigger))
+                        .find(|candidate| {
+                            candidate
+                                .triggers
+                                .iter()
+                                .any(|trigger| trigger == variable.params.trigger())
+                        })
                         .expect("nested match references were validated");
                     if !profile.includes_source(&target.source) {
                         bail!(
                             "app profile '{}': nested trigger '{}' is excluded",
                             profile.name,
-                            variable.params.trigger
+                            variable.params.trigger()
                         );
                     }
                 }
@@ -770,7 +821,7 @@ impl Config {
 fn validate_match_reference(
     index: usize,
     config: &Config,
-    by_trigger: &HashMap<&String, Vec<usize>>,
+    by_trigger: &HashMap<&str, Vec<usize>>,
     visiting: &mut HashSet<usize>,
     visited: &mut HashSet<usize>,
 ) -> Result<()> {
@@ -787,12 +838,12 @@ fn validate_match_reference(
         if variable.kind != VariableKind::Match {
             continue;
         }
-        let Some(targets) = by_trigger.get(&variable.params.trigger) else {
+        let Some(targets) = by_trigger.get(variable.params.trigger()) else {
             bail!(
                 "{}: match variable '{}' references unknown trigger '{}'",
                 config.matches[index].source.display(),
                 variable.name,
-                variable.params.trigger
+                variable.params.trigger()
             );
         };
         if targets.len() != 1 {
@@ -800,7 +851,7 @@ fn validate_match_reference(
                 "{}: match variable '{}' references ambiguous trigger '{}'",
                 config.matches[index].source.display(),
                 variable.name,
-                variable.params.trigger
+                variable.params.trigger()
             );
         }
         let target = targets[0];

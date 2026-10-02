@@ -1,0 +1,312 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "SnipExpand match file",
+  "description": "SnipExpand supported configuration. Run snipexpand check for date formats, timezone names, regexes, and cross-file semantic validation.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "name": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "parent": {
+      "enum": [
+        "default",
+        null
+      ]
+    },
+    "global_vars": {
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/variable"
+      }
+    },
+    "matches": {
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/match"
+      }
+    }
+  },
+  "definitions": {
+    "variable": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "name": {
+              "type": "string",
+              "minLength": 1
+            },
+            "type": {
+              "const": "date"
+            },
+            "params": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "format": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "description": "Chrono/strftime format. Empty or omitted uses %Y-%m-%d."
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "offset": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": -9223372036854775808,
+                      "maximum": 9223372036854775807,
+                      "description": "Elapsed seconds added to the current instant. Run snipexpand check to validate the resulting date range."
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "tz": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "minLength": 1,
+                      "description": "IANA timezone such as UTC or America/Chicago. Omit for system local time."
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "trigger": {
+                  "type": "null",
+                  "description": "Unused for date variables; omit this key."
+                }
+              }
+            }
+          },
+          "required": [
+            "name",
+            "type"
+          ]
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "name": {
+              "type": "string",
+              "minLength": 1
+            },
+            "type": {
+              "const": "match"
+            },
+            "params": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "trigger": {
+                  "type": "string",
+                  "minLength": 1,
+                  "description": "Exact, unambiguous trigger of another snippet."
+                },
+                "format": {
+                  "type": "null",
+                  "description": "Unused for match variables; omit this key."
+                },
+                "offset": {
+                  "type": "null",
+                  "description": "Unused for match variables; omit this key."
+                },
+                "tz": {
+                  "type": "null",
+                  "description": "Unused for match variables; omit this key."
+                }
+              },
+              "required": [
+                "trigger"
+              ]
+            }
+          },
+          "required": [
+            "name",
+            "type",
+            "params"
+          ]
+        }
+      ]
+    },
+    "match": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "trigger": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "triggers": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "regex": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "label": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "search_terms": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "replace": {
+          "type": "string",
+          "description": "Replacement text. $|$ places the cursor; {{name}} inserts a declared variable."
+        },
+        "vars": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/variable"
+          }
+        },
+        "word": {
+          "type": "boolean"
+        },
+        "left_word": {
+          "type": "boolean"
+        },
+        "right_word": {
+          "type": "boolean"
+        },
+        "propagate_case": {
+          "type": "boolean"
+        },
+        "uppercase_style": {
+          "enum": [
+            "uppercase",
+            "capitalize",
+            "capitalize_words"
+          ]
+        }
+      },
+      "required": [
+        "replace"
+      ],
+      "oneOf": [
+        {
+          "required": [
+            "trigger"
+          ],
+          "properties": {
+            "trigger": {
+              "type": "string",
+              "minLength": 1
+            },
+            "triggers": {
+              "maxItems": 0
+            },
+            "regex": {
+              "type": "null"
+            }
+          }
+        },
+        {
+          "required": [
+            "triggers"
+          ],
+          "properties": {
+            "triggers": {
+              "minItems": 1
+            },
+            "trigger": {
+              "type": "null"
+            },
+            "regex": {
+              "type": "null"
+            }
+          }
+        },
+        {
+          "required": [
+            "regex"
+          ],
+          "properties": {
+            "regex": {
+              "type": "string",
+              "minLength": 1
+            },
+            "trigger": {
+              "type": "null"
+            },
+            "triggers": {
+              "maxItems": 0
+            }
+          }
+        }
+      ],
+      "allOf": [
+        {
+          "if": {
+            "required": [
+              "uppercase_style"
+            ],
+            "properties": {
+              "uppercase_style": {
+                "enum": [
+                  "capitalize",
+                  "capitalize_words"
+                ]
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "propagate_case"
+            ],
+            "properties": {
+              "propagate_case": {
+                "const": true
+              }
+            }
+          }
+        }
+      ]
+    }
+  }
+}

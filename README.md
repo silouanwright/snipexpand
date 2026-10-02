@@ -196,6 +196,75 @@ matches:
           trigger: ";name"
 ```
 
+## Preview and validate snippets
+
+```bash
+snipexpand check
+snipexpand render ';greeting'
+snipexpand render ';function' --json
+snipexpand render ';mail' --source ~/.config/snipexpand/match/work.yml
+snipexpand render ';mail' --profile Work
+```
+
+`render` evaluates an exact configured literal trigger through the same renderer
+used by `paste`. It writes the replacement without an added newline, removes the
+first `$|$` cursor marker, and never types or changes the clipboard. JSON output
+includes `text`, `source`, `profile`, `cursor_position` (from the start), and
+`cursor_back` (from the end). Cursor offsets count Unicode characters, not bytes
+or visual columns.
+
+Use `--source` or `--profile` to resolve duplicates. Source paths may be absolute
+or relative to the current directory. A profile is selected by name without
+examining the focused window; a disabled profile produces an error. Without
+`--profile`, all configured matches are considered. This previews insertion,
+not the typed matching process: word boundaries, typed-case propagation, app
+exclusions, and regex sample input are not simulated.
+
+`check`, `render`, and `schema` do not create starter files or require a running
+daemon. On an empty configuration, `check` reports zero matches and `render`
+reports a missing trigger. Use `init` to create starter configuration.
+
+### Dates and timezones
+
+```yaml
+matches:
+  - trigger: ';utc'
+    replace: '{{stamp}}'
+    vars:
+      - name: stamp
+        type: date
+        params:
+          format: '%Y-%m-%dT%H:%M:%SZ'
+          tz: UTC
+          offset: 0
+```
+
+`tz` accepts IANA names such as `UTC`, `America/Chicago`, and `Europe/Paris`.
+Omit it to use system local time. Invalid zone names, invalid date formats, and
+out-of-range offsets are errors. Date variables, including nested snippets,
+share one captured instant per expansion. Offsets are elapsed seconds: `86400`
+is 24 hours, which can differ from the same local time tomorrow across a
+daylight-saving transition. Full locale overrides remain unsupported.
+
+Date variables accept `format`, `offset`, and `tz`; nested-match variables accept
+`trigger`. Variable names use letters, numbers, or underscores. Unsupported
+parameters are rejected, including on unused global definitions, so `check`
+catches mistakes before expansion. If rendering later fails, automatic expansion
+leaves the typed trigger intact and logs the error.
+
+### Editor autocomplete and validation
+
+Use the bundled YAML schemas for completion and error checking:
+
+```bash
+snipexpand schema match   # Prints the match-file schema as JSON
+snipexpand schema config  # Prints the settings schema as JSON
+```
+
+See [editor setup](schemas/README.md) for exporting schemas and associating them
+with YAML files. `snipexpand check` performs additional cross-file and semantic
+validation beyond the editor schema.
+
 ## Settings
 
 Edit `~/.config/snipexpand/config.yml`:
@@ -284,7 +353,10 @@ init                             Explicitly create starter configuration
 add TRIGGER TEXT                 Add or replace a generated expansion
 remove TRIGGER                   Remove a generated expansion
 list                             List triggers and source files
-check                            Validate configuration
+check                            Validate configuration without creating files
+render [--source PATH] [--profile NAME] [--json] TRIGGER
+                                Preview a literal snippet without typing
+schema config|match              Print a bundled YAML editor schema
 detect                           Inspect the focused application
 reload                           Reload the running daemon
 enable                           Enable automatic expansion

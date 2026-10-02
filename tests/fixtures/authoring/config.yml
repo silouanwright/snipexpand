@@ -1,0 +1,23 @@
+trigger_mode: space
+terminators: [space, enter, tab]
+word_separators: [' ', '🙂']
+regex_max_buffer: 4096
+injection_backend: wayland
+injection_delay_ms: 0
+wayland_injection_delay_ms: 50
+uinput_injection_delay_ms: null
+injection_settle_ms: 100
+undo_enabled: false
+app_exclusions:
+  - class: '^Secret$'
+app_profiles:
+  - name: Browser
+    filter: {title: Editor, class: Browser, exec: null}
+    enabled: true
+    include_match_files: [browser.yml]
+    exclude_match_files: [private.yml]
+    trigger_mode: immediate
+    terminators: [tab]
+    word_separators: [' ']
+    injection_delay_ms: 5
+    injection_settle_ms: 10

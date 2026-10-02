@@ -1,12 +1,14 @@
 mod app;
 mod config;
 mod daemon;
+mod date;
 mod expander;
 mod injector;
 mod ipc;
 mod keyboard;
 mod packs;
 mod permissions;
+mod preview;
 
 use clap::{Parser, Subcommand};
 
@@ -42,6 +44,25 @@ enum Cmd {
     },
     /// Validate all configuration files without starting the daemon
     Check,
+    /// Render a literal snippet to stdout without typing or contacting the daemon
+    Render {
+        /// Exact configured trigger (regex triggers are not supported)
+        trigger: String,
+        /// Match file path, absolute or relative to the current directory
+        #[arg(long)]
+        source: Option<std::path::PathBuf>,
+        /// Explicit app profile name; omitted means the unfiltered configuration
+        #[arg(long)]
+        profile: Option<String>,
+        /// Include source and Unicode character cursor offsets as JSON
+        #[arg(long)]
+        json: bool,
+    },
+    /// Print a bundled JSON schema for YAML editor completion and validation
+    Schema {
+        #[arg(value_enum)]
+        kind: SchemaKind,
+    },
     /// Diagnose configuration, session, permissions, and runtime dependencies
     Doctor {
         /// Emit machine-readable JSON
@@ -87,6 +108,12 @@ enum Cmd {
         #[command(subcommand)]
         command: PackCmd,
     },
+}
+
+#[derive(Clone, Copy, clap::ValueEnum)]
+enum SchemaKind {
+    Config,
+    Match,
 }
 
 #[derive(Subcommand)]
@@ -136,7 +163,12 @@ fn main() -> anyhow::Result<()> {
     if matches!(cli.command, Some(Cmd::Install { .. })) && unsafe { libc::geteuid() } == 0 {
         anyhow::bail!("Run snipexpand install as your desktop user, not root. Use --keyboard-access to request administrator authentication for device permissions only.");
     }
-    ensure_config()?;
+    if !matches!(
+        cli.command,
+        Some(Cmd::Render { .. } | Cmd::Schema { .. } | Cmd::Check)
+    ) {
+        ensure_config()?;
+    }
     match cli.command {
         None => {
             // Daemon mode: run the tokio event loop
@@ -187,6 +219,33 @@ fn handle_cmd(cmd: Cmd) -> anyhow::Result<()> {
                 cfg.loaded_files.len()
             );
             print_config_warnings(&cfg);
+        }
+
+        Cmd::Render {
+            trigger,
+            source,
+            profile,
+            json,
+        } => {
+            let cfg = config::Config::load_default()?;
+            let rendered = preview::render(&cfg, &trigger, source.as_deref(), profile.as_deref())?;
+            if json {
+                println!("{}", serde_json::to_string(&rendered)?);
+            } else {
+                use std::io::Write;
+                std::io::stdout()
+                    .lock()
+                    .write_all(rendered.text.as_bytes())?;
+            }
+        }
+
+        Cmd::Schema { kind } => {
+            let schema = match kind {
+                SchemaKind::Config => include_str!("../schemas/config.schema.json"),
+                SchemaKind::Match => include_str!("../schemas/match.schema.json"),
+            };
+            use std::io::Write;
+            std::io::stdout().lock().write_all(schema.as_bytes())?;
         }
 
         Cmd::Doctor { json } => doctor(json),

@@ -3,6 +3,22 @@
 This is the prioritized product backlog. Within each group, work from top to
 bottom unless user feedback provides a stronger signal.
 
+## Snippet authoring batch — 2026-10-01
+
+Implementation on `codex/snippet-authoring`, based on released v0.4.1. This batch
+is separate from the unfinished Unicode/Fcitx5 work and is not yet released.
+
+- [x] Add fallible date rendering and validate formats, offsets, timezone names,
+  variable names, and variable-specific parameters before expansion.
+- [x] Add read-only `render` with exact source/profile selection and JSON cursor
+  metadata, sharing the daemon renderer without desktop interaction.
+- [x] Add settings/match editor schemas, `schema` export, setup instructions,
+  and structural/semantic validation fixtures checked against the real CLI.
+- [x] Add explicit IANA date timezones, with fixed-clock tests for UTC, calendar
+  boundaries, both DST transitions, and positive/negative elapsed offsets.
+- [ ] Follow up separately on bounded echo support and named personal groups.
+- [ ] Validate live application delivery as part of the existing P0 matrix.
+
 ## P0: Make the current product dependable
 
 These tasks should come before adding major expansion features.
@@ -20,7 +36,7 @@ These tasks should come before adding major expansion features.
   - Document which user configuration remains after uninstalling.
 - [ ] Offer an Arch-native installation path.
   - Publish and maintain an AUR package for release binaries.
-  - Ensure installation, input-group access, service setup, upgrade, and removal
+  - Ensure installation, keyboard-only udev access, service setup, upgrade, and removal
     behave naturally on Omarchy and Arch Linux.
   - Keep Cargo and direct binary installation available.
 - [x] Rebuild the persistent Unicode keymaps after a configuration reload.

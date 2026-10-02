@@ -1,7 +1,7 @@
 ---
 name: snipexpand-shortcuts
 description: Add, remove, inspect, validate, and organize SnipExpand text-expansion shortcuts.
-version: 2.1.0
+version: 2.2.0
 ---
 
 # SnipExpand shortcuts
@@ -72,6 +72,25 @@ snipexpand remove ';mail'
 
 `remove` does not delete triggers defined in handwritten files. Use the source
 path shown by `snipexpand list` to find and edit those entries.
+
+## Preview without typing
+
+```bash
+snipexpand render ';sig'
+snipexpand render ';sig' --json
+snipexpand render ';mail' --source ~/.config/snipexpand/match/work.yml
+snipexpand render ';mail' --profile Work
+```
+
+Use preview to verify rendered text without changing focus, typing, or writing
+to the clipboard. Plain output has no added newline. JSON includes source and
+cursor offsets measured in Unicode characters. Select an exact literal trigger;
+regex matching and typed-case behavior are not simulated. Profiles are selected
+explicitly by name; omitted means all configured matches.
+
+`check`, `render`, and `schema` do not initialize or modify configuration.
+`snipexpand schema config` and `snipexpand schema match` print editor schemas;
+export them to JSON files and associate them through YAML Language Server.
 
 ## Snippet packs
 
@@ -151,8 +170,14 @@ Supported match fields:
 - `propagate_case`
 - `uppercase_style`: `uppercase`, `capitalize`, or `capitalize_words`
 - match-local `vars` and file-level `global_vars` of type `date` or `match`
-- date `params.format` and signed `params.offset` in seconds
+- date `params.format`, signed elapsed `params.offset` in seconds, and optional
+  `params.tz` using an IANA name such as `UTC` or `America/Chicago`
 - nested-match `params.trigger`, with cycles rejected during validation
+
+Unknown timezones, invalid date formats, out-of-range offsets, and parameters
+belonging to another variable type are rejected by `check`. Omit `tz` for system
+local time; locale overrides remain unsupported. All dates in an expansion,
+including nested snippets, use one instant.
 
 The first `$|$` in a replacement sets the final cursor position.
 

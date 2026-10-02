@@ -309,11 +309,18 @@ pub async fn run(config: Config) -> Result<()> {
                             let _ = stream.write_all(b"error: expansion is disabled\n").await;
                         } else if source.is_none() && expander.trigger_is_ambiguous(&trigger) {
                             let _ = stream.write_all(b"error: trigger is ambiguous; provide --source\n").await;
-                        } else if let Some(expansion) = expander.expansion_for_trigger(&trigger, source.as_deref()) {
-                            input.undo = inject_expansion(&injector, &config, expansion);
-                            let _ = stream.write_all(b"ok\n").await;
                         } else {
-                            let _ = stream.write_all(b"error: trigger not found\n").await;
+                            match expander.expansion_for_trigger(&trigger, source.as_deref()) {
+                                Ok(Some(expansion)) => {
+                                    input.undo = inject_expansion(&injector, &config, expansion);
+                                    let _ = stream.write_all(b"ok\n").await;
+                                }
+                                Ok(None) => { let _ = stream.write_all(b"error: trigger not found\n").await; }
+                                Err(error) => {
+                                    tracing::warn!("Snippet rendering failed: {error:#}");
+                                    let _ = stream.write_all(b"error: snippet rendering failed; see daemon log\n").await;
+                                }
+                            }
                         }
                     }
                     Err(e) => tracing::warn!("IPC error: {}", e),

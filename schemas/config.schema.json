@@ -1,0 +1,288 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "SnipExpand settings",
+  "description": "SnipExpand supported configuration. Run snipexpand check for date formats, timezone names, regexes, and cross-file semantic validation.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "trigger_mode": {
+      "enum": [
+        "immediate",
+        "space"
+      ],
+      "default": "immediate"
+    },
+    "terminators": {
+      "type": "array",
+      "items": {
+        "enum": [
+          "space",
+          "enter",
+          "tab"
+        ]
+      },
+      "default": [
+        "space"
+      ]
+    },
+    "word_separators": {
+      "anyOf": [
+        {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1
+          },
+          "description": "Override word delimiters; each entry is one Unicode character."
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "regex_max_buffer": {
+      "type": "integer",
+      "minimum": 32,
+      "maximum": 4096,
+      "default": 256
+    },
+    "injection_backend": {
+      "enum": [
+        "auto",
+        "wayland",
+        "uinput"
+      ],
+      "default": "auto"
+    },
+    "injection_delay_ms": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 50,
+      "default": 1
+    },
+    "wayland_injection_delay_ms": {
+      "anyOf": [
+        {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 50
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "uinput_injection_delay_ms": {
+      "anyOf": [
+        {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 50
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "injection_settle_ms": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 100,
+      "default": 10
+    },
+    "app_exclusions": {
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/appFilter"
+      }
+    },
+    "app_profiles": {
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/appProfile"
+      }
+    },
+    "undo_enabled": {
+      "type": "boolean",
+      "default": true
+    }
+  },
+  "definitions": {
+    "appFilter": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "title": {
+          "anyOf": [
+            {
+              "type": "string",
+              "description": "Regular expression matched against the application title."
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "class": {
+          "anyOf": [
+            {
+              "type": "string",
+              "description": "Regular expression matched against the application class."
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "exec": {
+          "anyOf": [
+            {
+              "type": "string",
+              "description": "Regular expression matched against the application exec."
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "anyOf": [
+        {
+          "required": [
+            "title"
+          ],
+          "properties": {
+            "title": {
+              "type": "string"
+            }
+          }
+        },
+        {
+          "required": [
+            "class"
+          ],
+          "properties": {
+            "class": {
+              "type": "string"
+            }
+          }
+        },
+        {
+          "required": [
+            "exec"
+          ],
+          "properties": {
+            "exec": {
+              "type": "string"
+            }
+          }
+        }
+      ]
+    },
+    "appProfile": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "\\S"
+        },
+        "filter": {
+          "$ref": "#/definitions/appFilter"
+        },
+        "enabled": {
+          "type": "boolean",
+          "default": true
+        },
+        "include_match_files": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Relative paths below match/ to include. Empty means all files."
+        },
+        "exclude_match_files": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Relative paths below match/ to exclude."
+        },
+        "trigger_mode": {
+          "anyOf": [
+            {
+              "enum": [
+                "immediate",
+                "space"
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "terminators": {
+          "anyOf": [
+            {
+              "type": "array",
+              "items": {
+                "enum": [
+                  "space",
+                  "enter",
+                  "tab"
+                ]
+              }
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "word_separators": {
+          "anyOf": [
+            {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 1
+              }
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "injection_delay_ms": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 50
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "injection_settle_ms": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 100
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "name",
+        "filter"
+      ]
+    }
+  }
+}
