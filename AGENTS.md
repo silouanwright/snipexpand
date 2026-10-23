@@ -67,6 +67,20 @@ journalctl --user -u snipexpand -f
 
 ## Validation workflow
 
+Graphical compatibility tests on Silouan's desktop must use the isolated VM:
+
+```bash
+python3 tests/vm/run.py
+```
+
+See `tests/vm/README.md`. Oligarchy boots a
+disposable Omarchy guest and runs the real input pipeline there. Do not stop the
+host daemon, focus host windows, inject host keystrokes, or replace the host
+clipboard for routine tests. If VM testing fails, fix the guest or report the
+failure; never fall back automatically to the host. Physical hardware checks
+need an explicit user request for that host check. Unit tests and builds remain
+safe to run on the host. The VM command rebuilds the current checkout before syncing its payload.
+
 Before finishing code changes:
 
 1. run `cargo test`

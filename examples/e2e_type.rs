@@ -339,6 +339,26 @@ fn run_compatibility_cases(copy_result: bool) -> anyhow::Result<()> {
     Ok(())
 }
 
+fn run_probe_copy(trigger: &str) -> anyhow::Result<()> {
+    // Validate before creating a device or clearing the target field.
+    for character in trigger.chars() {
+        keycode(character)?;
+    }
+    let mut device = create_device()?;
+    std::thread::sleep(Duration::from_millis(1500));
+    emit_state_with_delay(&mut device, 29, 1, event_delay())?;
+    emit_key(&mut device, 30)?; // Ctrl+A
+    emit_state_with_delay(&mut device, 29, 0, event_delay())?;
+    emit_key(&mut device, 14)?; // Clear synthetic test text.
+    type_trigger(&mut device, trigger)?;
+    emit_state_with_delay(&mut device, 29, 1, event_delay())?;
+    emit_key(&mut device, 30)?;
+    emit_key(&mut device, 46)?; // Ctrl+C
+    emit_state_with_delay(&mut device, 29, 0, event_delay())?;
+    std::thread::sleep(Duration::from_millis(500));
+    Ok(())
+}
+
 fn run_multiline_probe() -> anyhow::Result<()> {
     let mut device = create_device()?;
     std::thread::sleep(Duration::from_millis(1500));
@@ -361,6 +381,12 @@ fn main() -> anyhow::Result<()> {
     let trigger = args.next().unwrap_or_else(|| ";snipexpand".to_string());
     if trigger == "--live-reload-demo" {
         return run_live_reload_demo();
+    }
+    if trigger == "--probe-copy" {
+        let probe = args
+            .next()
+            .ok_or_else(|| anyhow::anyhow!("missing probe trigger"))?;
+        return run_probe_copy(&probe);
     }
     if trigger == "--compatibility" {
         return run_compatibility_suite();
