@@ -9,6 +9,7 @@ QEMU/KVM, controlled by Oligarchy. From the repository root:
 
 ```bash
 python3 tests/vm/run.py
+SNIPEXPAND_VM_CAMPAIGN=firefox-zed python3 tests/vm/run.py
 ```
 
 The runner builds the current checkout, boots a fresh overlay, copies the
@@ -94,6 +95,7 @@ tests/compatibility/verify-clipboard.sh
 Open one isolated launch-only target:
 
 ```bash
+tests/compatibility/launch-target.sh firefox
 tests/compatibility/launch-target.sh zed
 tests/compatibility/launch-target.sh electron
 tests/compatibility/launch-target.sh gtk
@@ -118,6 +120,20 @@ anything important before running it.
 The [v0.5.0 integration report](../../docs/release-0.5.0.md#live-matrix--2026-10-02)
 records current byte-exact passes for Chromium, Electron, GTK, Qt, and clean
 Neovim. Use that report for current results; the table below is historical.
+
+### Firefox/Zed guest campaign — 2026-10-23
+
+| Application | Fixture | Unicode reload |
+| --- | --- | --- |
+| Firefox 158.0.1 | Pass, 117 exact bytes | Add/change/remove passed; same daemon PID |
+| Zed 1.25.2 | Pass, 117 exact bytes | Add/change/remove passed; same daemon PID |
+
+These used Wayland injection in the disposable Omarchy guest, 15 ms input events,
+and a 250 ms expansion pause. Zed used software rendering and its dedicated
+synthetic-file profile. See [the VM guide](../vm/README.md) for the guarded command
+and setup, and [TASKS.md](../../TASKS.md#firefoxzed-guest-compatibility--2026-10-23)
+for exact local evidence. This does not validate physical GPUs, new kernels after
+reboot, non-US keyboard layouts, or broader IME behavior.
 
 ## Historical application matrix
 
