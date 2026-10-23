@@ -1,8 +1,5 @@
 # SnipExpand tasks
 
-It’s a Plan project: `personal.SNIPEXPAND`
-Repository identity: `github.com/silouanwright/snipexpand`
-
 This is the prioritized product backlog. Within each group, work from top to
 bottom unless user feedback provides a stronger signal.
 
@@ -85,7 +82,8 @@ keyboard/layout coverage below remains separate future work.
 
 ### Undo stress investigation and repeatable diagnostics
 
-Tracking: **SNIPEXPAND-1**, currently in progress; unresolved diagnosis must stay open.
+Tracking: **SNIPEXPAND-1**. Delivery and diagnostic coverage are recorded below;
+the unresolved undo diagnosis stays open after this batch.
 
 The production undo defect remains **unresolved**. No daemon or injector change
 was justified by the new evidence. Keep the original failed artifacts referenced
@@ -113,8 +111,14 @@ Verified in `/home/silouan/Documents/ChatGPT/SnipExpand/verification/20261023-un
   Unit tests verify that later successes cannot hide an earlier repeat failure
   and that release acceptance overrides focused/stress/repeat settings.
 
+The full five-target suite passed on the final diagnostic code and again after
+adding issue tracking. The first receipt was correctly withheld when the task
+record changed mid-run; `release-proof-tracked/receipt.json` attests the next
+commit. Moving the project mapping to the external Codex registry changes only
+the task record and requires one final exact-commit receipt.
+
 Final delivery evidence belongs in `final-delivery.json`, with the clean-commit
-full-suite receipt under `release-proof-tracked/receipt.json` and original fast fixture
+full-suite receipt under `release-proof-final/receipt.json` and original fast fixture
 repeats in `final-compatibility.json`. These external files record the exact
 commit, payload hashes, publication, CI, and completion without changing a tested
 commit to record its own hash. Their absence means that step has not completed.
