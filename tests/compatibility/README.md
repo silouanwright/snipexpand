@@ -4,6 +4,23 @@ This suite exercises SnipExpand's real evdev capture and Wayland injection
 pipeline. It must run inside a real Hyprland session, not Docker or ordinary
 GitHub Actions.
 
+The default on Silouan's machine is a full Omarchy guest running in background
+QEMU/KVM, controlled by Oligarchy. From the repository root:
+
+```bash
+python3 tests/vm/run.py
+```
+
+The runner builds the current checkout, boots a fresh overlay, copies the
+binaries and fixtures, refreshes the guest Fcitx bridge, and runs Neovim,
+Chromium, and a native Oligarchy keyboard-input check. It collects exact-output
+results and screenshots, then ends the disposable VM session and stops the test
+services. Read the [VM suite guide](../vm/README.md) for setup and coverage.
+
+Run the manual desktop commands below inside a disposable guest. Routine tests
+must not manipulate the host daemon, focus, input, or clipboard. A VM failure
+does not authorize a fallback to the host desktop.
+
 The fixture covers:
 
 - ASCII punctuation and spacing
@@ -13,7 +30,7 @@ The fixture covers:
 - Immediate Backspace undo
 - Twenty consecutive expansions
 
-## Run manually
+## Run manually inside the guest
 
 Build the daemon and driver first:
 
@@ -174,3 +191,6 @@ deliberately absent from the startup fixture.
 
 Result: Pass on Hyprland with the Wayland backend. The refreshed keymap handled
 the new character directly without invoking the Unicode fallback.
+
+The repository-owned [Oligarchy suite](../vm/README.md) now automates builds,
+VM lifecycle, native input checks, artifact collection, and cleanup.

@@ -128,3 +128,28 @@ pointing at an older unpacked source tree: tests compiled current source while
 `cargo run` chose that old executable. A fresh target proved current code; the
 stale default `target/debug` was moved to recoverable desktop Trash and rebuilt.
 This affected local build artifacts only, not the installed daemon.
+
+## Revalidation — 2026-10-20
+
+Audited the historical next-work request against checkout `84fa42c699f19a3630ca7f049dfea2956cde0b92`.
+The requested matcher/graph/schema/pack/reload implementation was already present;
+no new Rust change or minimized regression was needed.
+
+With `TMPDIR=/home/silouan/.cache/sx-test-tmp` and seed `20261020`:
+
+| Check | Result | Command wall time |
+| --- | --- | --- |
+| `cargo test --locked` (256 cases/property) | 149 tests passed | 1.817 s |
+| Matcher properties, 10,000 cases/property | 60,000 cases passed | 5.822 s |
+| Generated authoring CLI, 2,000 cases/property | 6,000 cases passed | 8.428 s |
+| Formatting, Clippy `--locked --all-targets -- -D warnings`, CLI help | Passed | See command records |
+
+Both extended campaigns had a 180-second timeout and a 2-GiB address-space cap.
+The full suite includes pack rollback and preserved-recovery-artifact checks,
+reload failure/queued-input checks, schema structural/semantic fixtures, and
+CLI propagation of reload rejection. No GUI session or installed daemon was used.
+
+[Exact commands, exit codes, timings, seed and limits](/home/silouan/Documents/ChatGPT/SnipExpand/verification/20261020-reliability/results.json)
+and [full test output](/home/silouan/Documents/ChatGPT/SnipExpand/verification/20261020-reliability/full-suite.log)
+are retained locally. Earlier counts and outstanding-work notes in this report
+are historical checkpoints; this section records the current revalidation.

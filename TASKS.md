@@ -3,6 +3,94 @@
 This is the prioritized product backlog. Within each group, work from top to
 bottom unless user feedback provides a stronger signal.
 
+## Firefox/Zed guest compatibility — 2026-10-23
+
+Status: complete locally. Isolated checkout
+`/home/silouan/Work/projects/snipexpand-compatibility`, branch
+`codex/compatibility-20261023`, commit `095baaa`, based on released integration `84fa42c`.
+No production code change or SnipExpand defect was needed for this campaign.
+
+- Firefox 158.0.1 and Zed 1.25.2 both passed the 117-byte fixture: ASCII,
+  Unicode/non-BMP emoji, multiline, cursor placement, immediate Backspace undo,
+  and twenty consecutive expansions. Each also passed add/change/remove Unicode
+  reload probes with the original daemon PID still alive.
+- Added the optional `SNIPEXPAND_VM_CAMPAIGN=firefox-zed` adapter and documented
+  the command in `tests/vm/README.md`. All graphical work uses guarded disposable
+  Oligarchy guests, the shared build limiter, and the VM serialization lock.
+- Fixed test setup: Omarchy package-update/install commands with guest sudo,
+  Stay Awake during downloads, explicit lock-state input guards, Firefox's clean
+  profile, Zed software-GPU allowance and correct custom-profile settings path.
+  Zed trust applies only to the disposable synthetic-file profile. SSH stderr
+  warnings no longer obscure the result JSON. The local shared runner now routes
+  SIGTERM through evidence export/cleanup; its patch is retained with evidence.
+- Passed: 149 Rust tests, fmt, CLI help, Clippy with warnings denied, release and
+  example builds, Python/Bash syntax checks, mixed-output parsing probe, and the
+  final full VM campaign. Every tested payload hash matched the checkout before
+  documentation closeout. Oligarchy/QEMU/PostgreSQL ports were closed afterward.
+
+Evidence: [campaign summary](/home/silouan/Documents/ChatGPT/SnipExpand/verification/20261023-compatibility/campaign-summary.json),
+[final VM result](/home/silouan/Documents/ChatGPT/SnipExpand/oligarchy-pilot/artifacts/20261023T180451457167Z/snipexpand/result.json),
+and [shared-runner patch](/home/silouan/Documents/ChatGPT/SnipExpand/verification/20261023-compatibility/shared-runner.patch).
+The run directory contains source/binary hashes, versions, exact text, screenshots,
+reload results, Zed settings/logs, and the exported guest archive. Earlier failed
+runs remain diagnostic evidence, not compatibility failures or passes.
+
+Remaining campaign work: none. Review/integration is separate; nothing was pushed,
+released, or installed on the host. Original Unicode/Fcitx WIP and dependency
+commit `91eecb3` remain separate and unchanged. Limits: one Omarchy/Hyprland guest,
+software rendering, existing boot kernel after package upgrades; no physical GPU,
+new-kernel reboot, non-US layout, suspend/hotplug, or broad IME coverage. Those
+broader keyboard/layout backlog items remain open. The base image still needs
+network package provisioning; preinstalling the apps in a future properly minted
+image would reduce repeated downloads.
+
+## Dependency maintenance — 2026-10-20
+
+Status: complete locally. Isolated checkout:
+`/home/silouan/Work/projects/snipexpand-dependencies`, branch
+`codex/dependencies-20261020`, commit `91eecb3137e192026edde8737f542349dc392e75`
+(base: integrated `84fa42c`, not the preserved Unicode/Fcitx branch).
+
+Updated tokio 1.53.1 → 1.54.0, serde-saphyr 1.2.0 → 1.3.0,
+serde_json 1.0.151 → 1.0.154, clap 4.6.6 → 4.6.7, libc 0.2.189 → 0.2.191,
+and proptest 1.11.0 → 1.12.0, plus compatible transitive refreshes. CI and
+release Cargo commands now use `--locked`. Existing Actions major tags already
+resolve to current releases. Manifest ranges, toolchain policy, and application
+source are unchanged. serde-saphyr 2 and jsonschema 0.59 are deferred pending
+separate compatibility review; neither is required by a current advisory.
+
+Passed: 149 Rust tests, formatting, Clippy with warnings denied, release build,
+CLI help, and CMake build/CTest (one bridge test), all using Rust 1.99.1 through
+the shared absolute Synaxis budget wrapper. RustSec audit before/after: zero
+vulnerabilities or warnings. Preserved all 40 existing changed files across
+both original checkouts apart from this new task section. Prior reliability
+work was not duplicated. No push, merge, release, application install, system
+package change, live-service action, or host desktop interaction occurred.
+
+[Full decisions, exact versions, commands and evidence](/home/silouan/Work/projects/snipexpand-dependencies/TASKS.md).
+Remaining local maintenance: none. Blockers: none. Review/integration and any
+release/install are separate; hosted Ubuntu/ARM CI and graphical VM acceptance
+were not run in this offline cycle.
+
+
+## Offline reliability revalidation — 2026-10-20
+
+- [x] Audit the control-tower request against actual history before reimplementing
+  the historical October 2 batch. Matcher (`cd406fa`), graph/schema (`1c40794`),
+  and pack/reload fixes (`e2a85a8`) already belong to the integrated history.
+- [x] Reverify `84fa42c`: 149 tests; 60,000 matcher cases and 6,000 graph/schema
+  cases with seed `20261020`; formatting, Clippy with warnings denied, CLI help.
+  Extended campaigns ran under 180-second/2-GiB limits in 5.822 s and 8.428 s.
+- [x] Correct the stale next-work list in the preserved original checkout's
+  `TASKS.md`; verify its other WIP files are unchanged and retain existing
+  uncommitted VM/documentation changes here.
+
+Evidence and exact commands: [verification results](/home/silouan/Documents/ChatGPT/SnipExpand/verification/20261020-reliability/results.json)
+and [suite scope](docs/testing/generated-suite.md). No new defect was reproduced;
+no production code changes, feature work, publishing, desktop input, or new
+services were needed. Requested batch complete; no blockers. Broader application
+and keyboard/layout work below remains open and must use the isolated VM path.
+
 ## v0.5.0 integration and release — 2026-10-02
 
 - [x] Integrate authoring/reliability/groups with the preserved Unicode/Fcitx work.
@@ -19,7 +107,7 @@ bottom unless user feedback provides a stronger signal.
   crates.io publication, and record final delivery evidence.
 
 Current evidence: [integration report](docs/release-0.5.0.md).
-Firefox/Zed and broader keyboard/layout campaigns remain backlog items below.
+Firefox/Zed guest coverage is complete above; broader keyboard/layout campaigns remain open.
 
 ## Snippet authoring batch — 2026-10-01
 

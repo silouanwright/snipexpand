@@ -517,3 +517,11 @@ anyone can use it, study it, improve it, and share it.
 Anyone who distributes a modified version must make its source available under
 compatible terms. The project cannot be repackaged and distributed as
 closed-source software. Private use and private modifications remain private.
+
+## Automated desktop testing
+
+Run `python3 tests/vm/run.py` from this checkout to test in a disposable Omarchy
+VM controlled by Oligarchy. The command saves results and screenshots, then
+stops its local test services. See [VM test setup and coverage](tests/vm/README.md)
+for the prepared local harness requirement. Routine tests never take over the
+host desktop.
