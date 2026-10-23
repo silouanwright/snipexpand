@@ -13,7 +13,7 @@ SNIPEXPAND_VM_CAMPAIGN=firefox-zed python3 tests/vm/run.py
 ```
 
 The runner builds the current checkout, boots a fresh overlay, copies the
-binaries and fixtures, refreshes the guest Fcitx bridge, and runs Neovim,
+binaries and fixtures, refreshes the guest Fcitx bridge, and runs Firefox, Zed, Neovim,
 Chromium, and a native Oligarchy keyboard-input check. It collects exact-output
 results and screenshots, then ends the disposable VM session and stops the test
 services. Read the [VM suite guide](../vm/README.md) for setup and coverage.

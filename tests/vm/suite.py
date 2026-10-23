@@ -45,12 +45,36 @@ def campaign(h):
 
 
 def run(h):
-    if os.environ.get('SNIPEXPAND_VM_CAMPAIGN') == 'firefox-zed':
+    selection = os.environ.get('SNIPEXPAND_VM_CAMPAIGN', 'full')
+    if selection not in ('full', 'core', 'firefox-zed'):
+        raise ValueError('Unknown SNIPEXPAND_VM_CAMPAIGN: ' + selection)
+    if selection == 'firefox-zed':
         return campaign(h)
+    h.logged('packages', 'python3 ~/snipexpand/tests/vm/guest-packages.py', timeout=60)
+    failures = []
+    if selection == 'full':
+        try:
+            campaign(h)
+        except Exception as error:
+            h.checks.append({'name': 'firefox-zed-suite', 'passed': False, 'error': str(error)})
+            failures.append(str(error))
+    # Native QMP setup intentionally keeps its daemon alive until guest teardown.
+    # Run it last; Firefox/Zed clean up their own subprocesses before returning.
+    try:
+        core(h)
+    except Exception as error:
+        h.checks.append({'name': 'core-suite', 'passed': False, 'error': str(error)})
+        failures.append(str(error))
+    (h.out / 'checks.json').write_text(json.dumps(h.checks, indent=2) + '\n')
+    if failures:
+        raise RuntimeError('; '.join(failures))
+
+
+def core(h):
     h.logged('install', 'python3 ~/guest-setup.py')
     for app in ('nvim', 'chromium'):
         output=h.logged(app, f'python3 ~/guest-test.py {app}', timeout=240)
-        result=json.loads(output.splitlines()[-1])
+        result=application_result(output.decode())
         h.record(app, result['passed'], bytes=result.get('bytes'), guest_artifacts=result['artifacts'])
     h.logged('native-setup', 'python3 ~/native-setup.py')
     h.client('intent','start','--test-result-id',h.agent,'--message','Native ASCII, Unicode, and multiline expansion')

@@ -3,6 +3,59 @@
 This is the prioritized product backlog. Within each group, work from top to
 bottom unless user feedback provides a stronger signal.
 
+## Graphical release gate and prepared image — 2026-10-23
+
+Status: implemented and validated locally. Compatibility commit `095baaa` is
+integrated on `codex/integrated-release` as `5a0494a`; prior VM documentation and
+continuity were preserved in `5a5801b`. No production SnipExpand change was needed.
+
+- `python3 tests/vm/run.py` now runs Firefox, Zed, Neovim, Chromium, and native
+  QMP expansion. Normal tests verify installed packages without downloading or
+  updating them. The shared runner automatically takes the local build budget.
+- `tests/vm/release-check.py run --output /outside/checkout/evidence` requires a
+  clean commit, all five checks, a sealed image, matching source/binary/harness
+  hashes, and complete cleanup. An explicit `publish` posts the receipt hash to
+  GitHub. The tag workflow requires the latest trusted `desktop-vm/full` status
+  for that exact commit before either architecture build. CI runs the negative
+  gate tests. Nothing has been pushed or published in this batch; the remote
+  release gate takes effect after these workflow changes are pushed.
+- Prepared and activated `desktop-20261023-v1`: original base hashes unchanged,
+  two verified OS shutdowns, a reboot into kernel `7.2.8-9-omarchy`, standalone
+  qcow2, pinned disk/firmware hashes. Apps: Firefox 158.0.1, Zed 1.25.2, Chromium
+  155.0.8059.84, Neovim 0.12.6; Omarchy package 4.0.6, Hyprland 0.56.2.
+  This was system-package provisioning, not the full Omarchy migration sequence.
+- All five SnipExpand checks passed on that image. LookElsewhere also passed
+  guest installation, native Escape dismissal, and live reliability. Its test
+  installer needed a bounded wait for asynchronous plugin discovery; the
+  test-only companion commit is `8c45c23688be667ef0e13dc9e7422196bc99fcd7`.
+  Its preexisting README edit remains untouched. No plugin runtime code changed.
+- Passed 149 Rust tests, CLI help, formatting, 15 Python gate/image/routing tests,
+  workflow YAML/dependency checks, and an actual CLI rejection of dirty source.
+  Original Unicode/Fcitx WIP and dependency commit `91eecb3` remain unchanged.
+
+Evidence: `/home/silouan/Documents/ChatGPT/SnipExpand/verification/20261023-automation/`.
+`image-accepted.json` identifies the passing runs for both projects;
+`validation.log` records unit checks. The final clean-commit proof belongs in
+`release-proof/receipt.json`, produced after this documentation checkpoint by
+`release-check.py`; its `commit` must match HEAD before any publication. An absent
+receipt means that final step has not completed. This external receipt avoids
+changing a tested commit merely to write its own hash into this task record.
+
+The first preparation attempt installed packages but treated the SSH disconnect
+on poweroff as an error. Preparation now acknowledges a delayed guest OS shutdown
+before waiting for QEMU exit zero. The dedicated provisioning disk was checked,
+rebooted, and cleanly stopped twice before sealing; no test overlay was promoted.
+The first LookElsewhere image test failed on plugin-discovery timing; its retry
+passed after the guest-only readiness fix. Both failures remain in the evidence.
+
+Shared runner code is tracked under `tests/vm/harness/` and deployed through
+`tests/vm/install-harness.py`, which backs up code and preserves local state.
+[Commands, limits, image refresh and release procedure](tests/vm/README.md).
+Remaining delivery: push the verified local commits when requested; publish a
+fresh receipt for the actual release commit before pushing its tag. No hosted VM
+runner, timer, release, or host desktop changes were created. Broader feature and
+keyboard/layout coverage below remains separate future work.
+
 ## Firefox/Zed guest compatibility — 2026-10-23
 
 Status: complete locally. Isolated checkout
@@ -35,14 +88,13 @@ The run directory contains source/binary hashes, versions, exact text, screensho
 reload results, Zed settings/logs, and the exported guest archive. Earlier failed
 runs remain diagnostic evidence, not compatibility failures or passes.
 
-Remaining campaign work: none. Review/integration is separate; nothing was pushed,
-released, or installed on the host. Original Unicode/Fcitx WIP and dependency
+Remaining campaign work: none. Integrated locally as `5a0494a` in the automation
+batch above; nothing was pushed, released, or installed on the host. Original Unicode/Fcitx WIP and dependency
 commit `91eecb3` remain separate and unchanged. Limits: one Omarchy/Hyprland guest,
 software rendering, existing boot kernel after package upgrades; no physical GPU,
 new-kernel reboot, non-US layout, suspend/hotplug, or broad IME coverage. Those
-broader keyboard/layout backlog items remain open. The base image still needs
-network package provisioning; preinstalling the apps in a future properly minted
-image would reduce repeated downloads.
+broader keyboard/layout backlog items remain open. The automation batch above supersedes the original network-provisioning
+requirement with a prepared, versioned image.
 
 ## Dependency maintenance — 2026-10-20
 

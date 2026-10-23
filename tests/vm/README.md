@@ -1,86 +1,136 @@
-# SnipExpand desktop tests in Oligarchy
-
-From the repository root:
+# Graphical tests and the release gate
 
 ```bash
 python3 tests/vm/run.py
 ```
 
-The runner builds the current checkout with Cargo, installs its Fcitx bridge in
-the guest, and checks exact output in Neovim and Chromium. It also exercises
-ASCII, Unicode, and multiline expansion through Oligarchy keyboard input.
+The default suite runs Firefox, Zed, Neovim, Chromium, and native Oligarchy
+keyboard input in a disposable Omarchy guest. Fixtures compare exact UTF-8 bytes
+for ASCII, Unicode/emoji, multiline text, cursor placement, undo, and repeated
+expansion. Firefox and Zed also test add/change/remove reloads while the original
+daemon stays alive. Failed checks and incomplete cleanup return nonzero.
 
-The shared runner starts its local PostgreSQL database and the pinned Oligarchy
-server, reserves a slot, boots a disposable Omarchy disk overlay, copies the
-explicit project payload, runs the suite, saves evidence, and stops the services.
-A failed check returns a nonzero exit status. No host desktop fallback is allowed.
-The suite refuses to use occupied ports or an already-running harness session.
+All keyboard, clipboard, focus, service, and installation operations belong to
+the guarded guest. There is no host desktop fallback. A root-owned marker,
+QEMU/KVM detection, pinned SSH host keys, and application focus guards protect
+the input path. These tests do not cover physical keyboards, GPU hardware,
+suspend/hotplug, non-US layouts, or the full IME matrix.
 
-## Local prerequisite
+## Existing local installation
 
-This machine has the prepared harness at
-`~/Documents/ChatGPT/SnipExpand/oligarchy-pilot`. Override its location with
-`OLIGARCHY_HARNESS_HOME`. The wrapper checks for that installation and refuses
-if it is missing; it does not download software or provision a VM implicitly.
-See that directory's `AUTOMATION.md` for setup, ports, artifacts, and limitations.
-This is an on-demand local VM test command, not a hosted CI job or scheduled task.
+The wrapper uses `~/Documents/ChatGPT/SnipExpand/oligarchy-pilot`, or
+`OLIGARCHY_HARNESS_HOME`. A new machine still needs the prepared Omarchy base,
+Oligarchy dependencies, local PostgreSQL cluster, guest SSH key, and KVM. See
+the installation's `AUTOMATION.md`. Credentials and VM disks stay outside this
+repository. This command does not register a GitHub self-hosted runner or a timer.
 
-Each run records the source commit, dirty status, and SHA-256 of every payload
-file. Uncommitted changes in the selected payload are tested too. Screenshots,
-project results, Oligarchy action history, and exported guest logs live under the
-harness's `artifacts/<timestamp>/snipexpand/`.
-No credentials or disk images belong in this repository.
-
-`tests/vm/suite.py` owns the project assertions. The shared runner owns lifecycle
-and cleanup. The guest marker and virtualization checks must run before any
-service, display, keyboard, clipboard, plugin installation, or state operation.
-
-## Firefox and Zed campaign
+Update an existing installation's shared runner code from this checkout:
 
 ```bash
-SNIPEXPAND_VM_CAMPAIGN=firefox-zed \
-  /home/silouan/Work/projects/synaxis/scripts/synaxis-build-budget.sh -- \
-  python3 tests/vm/run.py
+python3 tests/vm/install-harness.py
 ```
 
-This optional campaign uses the same Oligarchy lifecycle and disposable overlay.
-The default Neovim/Chromium suite remains available without the environment flag.
-The shared build limiter serializes heavy work on this machine; the Oligarchy
-runner separately locks its VM slot. The command above uses both.
+The installer backs up the three code files, takes the shared VM lock, and
+preserves credentials, disks, database, and guest helper files. The tracked
+copies are under `tests/vm/harness/`. The installation's guest helpers are also
+hashed in each payload manifest, so changing them invalidates a release receipt.
 
-Missing Firefox/Zed packages are installed only inside the guarded guest, with a
-full system-package upgrade through `omarchy update system-pkgs`, followed by
-`omarchy pkg add`, to avoid a partial upgrade. This updates packages only; it is
-not a full Omarchy migration or a test of the new kernel after reboot. Network/package failures
-are setup failures, not application compatibility verdicts. Package versions
-and installation output are retained in the run evidence.
+On Silouan's machine, the shared runner automatically uses the Synaxis build
+budget wrapper (two CPUs, idle I/O, serialized heavy work). Set
+`SNIPEXPAND_BUILD_BUDGET` to use another wrapper. The VM has its own exclusive
+lock and refuses occupied ports instead of touching unrelated services.
 
-Each application gets a separate profile and daemon configuration. The fixture
-compares clipboard bytes for ASCII, Unicode including non-BMP emoji, multiline
-text, cursor placement, Backspace undo, and twenty repeated expansions. It then
-adds, changes, and removes a Unicode snippet through reload, checking each output
-and that the daemon remains alive. All text is synthetic. Focus guards abort
-input if another guest window takes focus. `--probe-copy` is a test-driver mode
-used by this guarded guest runner; never invoke input drivers on the host.
+## Prepared images
 
-Each app has its own result JSON. A mismatch does not skip the other app; missing
-applications or a renderer that cannot start are reported as unavailable/failed,
-never as a pass. App logs, screenshots, actual/expected bytes, and reload results
-are exported in `guest-results.tar`. A VM failure can prevent that export;
-the outer run logs and retained disposable disk remain diagnostic evidence.
+Normal tests **never install or update guest packages**. Prepare a new version
+explicitly when applications need updating:
 
-Zed runs with software rendering explicitly allowed (`ZED_ALLOW_EMULATED_GPU=1`).
-The guarded runner enables `session.trust_all_worktrees` only in its disposable
-synthetic-file profile, so startup prompts cannot consume the first fixture line.
-It does not change the normal Zed profile. This is a software-renderer input test,
-not a hardware GPU validation. See [Zed worktree trust](https://zed.dev/docs/worktree-trust).
+```bash
+HARNESS="$HOME/Documents/ChatGPT/SnipExpand/oligarchy-pilot"
+/home/silouan/Work/projects/synaxis/scripts/synaxis-build-budget.sh -- \
+  python3 "$HARNESS/prepare-image.py" desktop-YYYYMMDD-v1 --source "$PWD"
+python3 "$HARNESS/run.py" all --image desktop-YYYYMMDD-v1 \
+  --result-file /tmp/desktop-image-validation.json
+python3 "$HARNESS/images.py" desktop-YYYYMMDD-v1 \
+  --results /tmp/desktop-image-validation.json
+```
 
-The guest enables Omarchy Stay Awake before package setup, preventing idle lock
-during downloads. The input guard also checks shell lock state: Hyprland can
-retain an application's active-window address behind the lock screen. A locked
-session fails before typing rather than being treated as a focused editor.
-Stay Awake exists only in the disposable guest and disappears with that overlay.
+Use a new name each time. Preparation starts from the original sealed base in a
+fresh overlay, runs Omarchy's system-package update and package installer only
+inside that guest, powers off, boots again, verifies applications, then powers
+off cleanly a second time. It converts the disk to a standalone qcow2 and records
+package versions, booted kernel, original hashes, and final disk/firmware hashes.
+Interrupted provisioning directories remain diagnostic evidence and cannot be
+selected as sealed images. No prior test overlay is promoted.
 
-With `--user-data-dir`, Zed reads settings from `<profile>/config/settings.json`
-(the override takes precedence over `XDG_CONFIG_HOME`). The guest exports that
-settings file and Zed's internal logs with its other evidence.
+Activation requires all SnipExpand checks and LookElsewhere to pass on the same
+image, because the installation is shared. The active pointer changes atomically
+and retains its previous value. Old image versions remain available. Every run
+verifies hashes before booting; `--image NAME` selects a particular version.
+Image preparation updates system packages, not the complete Omarchy migration
+sequence. Record a new image version after deliberate migration work.
+
+## Release procedure
+
+Commit the release version and all intended changes first. From that clean
+checkout, produce a receipt outside the repository:
+
+```bash
+python3 tests/vm/release-check.py run \
+  --output "$HOME/Documents/ChatGPT/SnipExpand/verification/release-vX.Y.Z"
+```
+
+This forces the full suite, rebuilds with `--locked`, and requires all five
+checks, a sealed image, clean source, matching payload hashes, and successful
+cleanup. It saves a local `receipt.json` plus the usual artifacts. The receipt
+hashes all evidence files, including screenshots, logs, the guest archive, and
+payload provenance. A changed commit, binary, harness, or evidence file requires
+a fresh run. Do not amend the commit after testing.
+
+After pushing that exact commit, explicitly publish its passing status:
+
+```bash
+gh auth switch --user silouanwright
+python3 tests/vm/release-check.py publish /absolute/path/to/receipt.json
+```
+
+Then tag that tested commit and push the tag through the normal release process.
+The release workflow checks `desktop-vm/full` on the **exact tag commit** before
+either architecture build starts. Missing, pending, failed, or untrusted statuses
+block release. The status description contains the receipt's SHA-256; evidence
+remains local and should be retained with the release record.
+
+By default, only a status created by the repository owner is accepted. A project
+using a dedicated test account can set the repository variable `VM_GATE_ACTOR`
+and use the same environment variable when publishing. The account needs commit
+status write access. This is an owner-attested local test gate, not a hosted VM
+job or cryptographic proof against an owner who deliberately bypasses it. It uses
+[GitHub commit statuses](https://docs.github.com/en/rest/commits/statuses).
+Normal test runs never write to GitHub, push code, create tags, or publish releases.
+
+GitHub CI runs the gate's negative tests alongside Rust and Fcitx bridge checks.
+The tag workflow enforces graphical acceptance once these changes are pushed.
+
+## Focused debugging and evidence
+
+```bash
+SNIPEXPAND_VM_CAMPAIGN=core python3 tests/vm/run.py
+SNIPEXPAND_VM_CAMPAIGN=firefox-zed python3 tests/vm/run.py
+python3 -m unittest discover -s tests/vm -p 'test_*.py'
+```
+
+Focused runs do not qualify for a release receipt. Full runs continue to the
+other application group if one group fails. Native QMP input runs last because
+its fixture daemon remains alive until the guest is disposed.
+
+Evidence lives under the harness's `artifacts/<timestamp>/snipexpand/`: results,
+source commit/dirty status, payload and harness hashes, image manifest, screenshots,
+guest logs, and Oligarchy action history. A VM crash may prevent guest export;
+outer logs and retained disposable disks still provide diagnostic evidence.
+
+Zed uses software rendering (`ZED_ALLOW_EMULATED_GPU=1`) and trusts only the
+synthetic files in its disposable profile. Its `--user-data-dir` settings are at
+`<profile>/config/settings.json`; the runner exports settings and internal logs.
+Firefox has its own clean profile. Guest Stay Awake prevents idle locking, and
+Firefox/Zed input guards explicitly reject a locked session even when Hyprland
+still reports the previous active window.

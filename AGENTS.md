@@ -115,7 +115,11 @@ CI remains available as an additional check when a pull request is useful.
 
 ## Cutting a release
 
-A tag on `main` triggers the full release pipeline. CI builds binaries, creates a GitHub Release, and publishes to crates.io automatically.
+A tag on `main` triggers the release pipeline. Before tagging, run and publish
+the exact-commit graphical acceptance receipt as described in
+`tests/vm/README.md`. A missing `desktop-vm/full` status blocks the pipeline.
+After that gate passes, CI builds binaries, creates a GitHub Release, and
+publishes to crates.io automatically. Never amend the tested commit before tagging.
 
 ```bash
 # Manual (no extra tools needed):
