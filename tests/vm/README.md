@@ -135,8 +135,21 @@ Firefox has its own clean profile. Guest Stay Awake prevents idle locking, and
 Firefox/Zed input guards explicitly reject a locked session even when Hyprland
 still reports the previous active window.
 
-The compatibility driver waits the configured expansion pause (250 ms in the
-VM fixture) after Backspace undo before sending Enter. Undo itself remains the
+The compatibility driver waits the configured expansion pause (500 ms in the
+standard VM fixture) after Backspace undo before sending Enter. Undo itself remains the
 first key after expansion. This checks settled undo output; it does not establish
 correctness when new physical keys arrive during undo injection. The original
 no-wait Zed mismatch is retained in the October 23 evidence and backlog.
+
+### Input timing and the open stress case
+
+Standard acceptance uses 90 ms per key transition (the driver's normal input
+pace) and 500 ms after expansion/undo, including software-rendered applications.
+The release command forces this profile and verifies those timings in the results.
+It proves compatibility at that pace, not a maximum supported typing speed.
+
+`SNIPEXPAND_VM_TIMING=stress python3 tests/vm/run.py` retains 15 ms transitions
+and 250 ms pauses for deliberate stress testing. The October 23 repeat exposed
+an intermittent Firefox undo-boundary mismatch at that rate, after the separate
+Zed driver-settling correction. No daemon fix is claimed. Stress mode remains
+available and its failures are retained; it cannot produce a release receipt.

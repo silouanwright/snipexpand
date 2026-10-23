@@ -34,7 +34,7 @@ class GateTests(unittest.TestCase):
         self.manifest['harness_sha256'][str(harness)] = gate.digest(harness)
         self.result = {'project': 'snipexpand', 'passed': True, 'artifacts': str(self.root),
                        'image': {'sealed': True, 'name': 'test-image', 'manifest_sha256': 'b' * 64},
-                       'checks': [{'name': name, 'passed': True} for name in sorted(gate.REQUIRED)]}
+                       'checks': [{'name': name, 'passed': True, 'event_delay_ms': 90, 'expansion_pause_ms': 500} for name in sorted(gate.REQUIRED)]}
         self.save_manifest()
 
     def save_manifest(self):
@@ -50,7 +50,8 @@ class GateTests(unittest.TestCase):
                        lambda r: r['checks'][0].update(passed=False),
                        lambda r: r.update(passed=False),
                        lambda r: r.update(cleanup_errors=['stop failed']),
-                       lambda r: r.update(image=None)]:
+                       lambda r: r.update(image=None),
+                       lambda r: r['checks'][0].update(event_delay_ms=15)]:
             with self.subTest(mutate=mutate):
                 result = copy.deepcopy(self.result)
                 mutate(result)

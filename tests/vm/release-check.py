@@ -42,6 +42,9 @@ def validate_result(results, commit):
     names = [check.get('name') for check in checks]
     if set(names) != REQUIRED or len(names) != len(REQUIRED) or any(c.get('passed') is not True for c in checks):
         raise ValueError('All five graphical checks must pass exactly once')
+    for check in checks:
+        if check['name'] != 'native-qmp-expansion' and (check.get('event_delay_ms'), check.get('expansion_pause_ms')) != (90, 500):
+            raise ValueError('Release checks require the standard 90/500 ms input timing')
     image = result.get('image') or {}
     if image.get('sealed') is not True or not image.get('manifest_sha256'):
         raise ValueError('Release checks require a sealed, versioned image')
@@ -88,7 +91,7 @@ def run(args):
     receipt = output / 'receipt.json'
     if summary.exists() or receipt.exists():
         raise ValueError('Evidence already exists; choose a fresh output directory')
-    env = {**os.environ, 'SNIPEXPAND_VM_CAMPAIGN': 'full'}
+    env = {**os.environ, 'SNIPEXPAND_VM_CAMPAIGN': 'full', 'SNIPEXPAND_VM_TIMING': 'standard'}
     command = [sys.executable, str(ROOT / 'tests/vm/run.py'), '--result-file', str(summary)]
     if args.image:
         command.extend(['--image', args.image])

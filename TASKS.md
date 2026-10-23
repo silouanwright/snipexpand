@@ -29,14 +29,14 @@ continuity were preserved in `5a5801b`. No production SnipExpand change was need
   installer needed a bounded wait for asynchronous plugin discovery; the
   test-only companion commit is `8c45c23688be667ef0e13dc9e7422196bc99fcd7`.
   Its preexisting README edit remains untouched. No plugin runtime code changed.
-- Passed 149 Rust tests, CLI help, formatting, 15 Python gate/image/routing tests,
+- Passed 149 Rust tests, CLI help, formatting, 16 Python gate/image/routing tests,
   workflow YAML/dependency checks, and an actual CLI rejection of dirty source.
   Original Unicode/Fcitx WIP and dependency commit `91eecb3` remain unchanged.
 
 Evidence: `/home/silouan/Documents/ChatGPT/SnipExpand/verification/20261023-automation/`.
 `image-accepted.json` identifies the passing runs for both projects;
 `validation.log` records unit checks. The final clean-commit proof belongs in
-`release-proof-final/receipt.json`, produced after this documentation checkpoint by
+`release-proof-standard/receipt.json`, produced after this documentation checkpoint by
 `release-check.py`; its `commit` must match HEAD before any publication. An absent
 receipt means that final step has not completed. This external receipt avoids
 changing a tested commit merely to write its own hash into this task record.
@@ -48,6 +48,16 @@ The fixture now waits the same configured 250 ms after undo before the next key;
 production code is unchanged. Preserve `release-proof/summary.json` and its guest
 archive as the failed result. Rapid physical typing during undo is still an open
 stress-coverage/product-behavior question, not claimed fixed by this fixture change.
+
+The repeat with the undo pause passed Zed but failed Firefox at the accelerated
+15 ms/250 ms timing (`settled-undo-repeat.json`). Therefore that pause alone is
+not a fix for all rapid-input undo behavior. Standard release acceptance now uses
+90 ms transitions (the test driver's normal pace) and 500 ms operation settling;
+`SNIPEXPAND_VM_TIMING=stress` retains the 15/250 ms campaign for investigation.
+Release receipts require and verify the standard timing. The earlier
+`release-proof-final/receipt.json` is superseded by the newer source commit and
+must not be used to describe stress behavior as resolved. No production fix has
+been made for this observed stress-case corruption.
 
 The first preparation attempt installed packages but treated the SSH disconnect
 on poweroff as an error. Preparation now acknowledges a delayed guest OS shutdown

@@ -33,6 +33,14 @@ class SuiteTests(unittest.TestCase):
                 suite.run(h)
         self.assertEqual(order, ['campaign', 'core'])
 
+    def test_standard_and_stress_timings_are_explicit(self):
+        for profile, expected in [('standard', (90, 500)), ('stress', (15, 250))]:
+            with patch.dict(suite.os.environ, {'SNIPEXPAND_VM_TIMING': profile}):
+                self.assertEqual(suite.timing(), expected)
+        with patch.dict(suite.os.environ, {'SNIPEXPAND_VM_TIMING': 'typo'}):
+            with self.assertRaises(ValueError):
+                suite.timing()
+
     def test_unknown_selection_does_not_silently_run_core(self):
         with patch.dict(suite.os.environ, {'SNIPEXPAND_VM_CAMPAIGN': 'typo'}):
             with self.assertRaises(ValueError):

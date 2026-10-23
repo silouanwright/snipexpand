@@ -21,13 +21,21 @@ def application_result(output):
     raise ValueError('No application result JSON in guest output')
 
 
+def timing():
+    profile = os.environ.get('SNIPEXPAND_VM_TIMING', 'standard')
+    if profile not in ('standard', 'stress'):
+        raise ValueError('Unknown SNIPEXPAND_VM_TIMING: ' + profile)
+    return (90, 500) if profile == 'standard' else (15, 250)
+
+
 def campaign(h):
     h.logged('packages', 'python3 ~/snipexpand/tests/vm/guest-packages.py', timeout=780)
     h.logged('install', 'python3 ~/guest-setup.py')
+    event_delay, pause = timing()
     results = []
     for app in ('firefox', 'zed'):
         try:
-            output = h.logged(app, f'python3 ~/snipexpand/tests/vm/guest-campaign.py {app}', timeout=300)
+            output = h.logged(app, f'python3 ~/snipexpand/tests/vm/guest-campaign.py {app} --event-delay {event_delay} --pause {pause}', timeout=300)
             result = application_result(output.decode())
         except Exception as error:
             try:
@@ -71,11 +79,13 @@ def run(h):
 
 
 def core(h):
+    event_delay, pause = timing()
     h.logged('install', 'python3 ~/guest-setup.py')
     for app in ('nvim', 'chromium'):
-        output=h.logged(app, f'python3 ~/guest-test.py {app}', timeout=240)
+        output=h.logged(app, f'python3 ~/guest-test.py {app} --event-delay {event_delay} --pause {pause}', timeout=240)
         result=application_result(output.decode())
-        h.record(app, result['passed'], bytes=result.get('bytes'), guest_artifacts=result['artifacts'])
+        h.record(app, result['passed'], bytes=result.get('bytes'), guest_artifacts=result['artifacts'],
+                 event_delay_ms=result['event_delay_ms'], expansion_pause_ms=result['expansion_pause_ms'])
     h.logged('native-setup', 'python3 ~/native-setup.py')
     h.client('intent','start','--test-result-id',h.agent,'--message','Native ASCII, Unicode, and multiline expansion')
     target=json.loads(h.remote('python3','/home/omarchy/guest-desktop.py','hyprctl','activewindow','-j'))
