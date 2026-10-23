@@ -4,6 +4,7 @@ import importlib.util
 import json
 from pathlib import Path
 import tempfile
+from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
@@ -90,6 +91,19 @@ class GateTests(unittest.TestCase):
         for data in invalid:
             with self.subTest(data=data), self.assertRaises(ValueError):
                 gate.check_status(data, self.commit, 'owner')
+
+    def test_release_run_overrides_stress_and_repeat_environment(self):
+        with tempfile.TemporaryDirectory() as directory, \
+             patch.object(gate, 'clean_commit', return_value=self.commit), \
+             patch.dict(gate.os.environ, {'SNIPEXPAND_VM_CAMPAIGN': 'undo-stress',
+                        'SNIPEXPAND_VM_TIMING': 'stress', 'SNIPEXPAND_VM_CAMPAIGN_REPEATS': '10'}), \
+             patch.object(gate.sp, 'run', side_effect=RuntimeError('stop before VM')) as run:
+            with self.assertRaisesRegex(RuntimeError, 'stop before VM'):
+                gate.run(SimpleNamespace(output=Path(directory) / "evidence", image=None))
+            env = run.call_args.kwargs['env']
+            self.assertEqual(env['SNIPEXPAND_VM_CAMPAIGN'], 'full')
+            self.assertEqual(env['SNIPEXPAND_VM_TIMING'], 'standard')
+            self.assertEqual(env['SNIPEXPAND_VM_CAMPAIGN_REPEATS'], '1')
 
     def test_dirty_checkout_cannot_publish(self):
         with patch.object(gate, 'git', return_value='?? untracked.rs'):

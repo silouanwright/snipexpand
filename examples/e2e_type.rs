@@ -298,6 +298,28 @@ fn run_compatibility_clipboard_suite() -> anyhow::Result<()> {
     run_compatibility_cases(true)
 }
 
+fn run_undo_stress() -> anyhow::Result<()> {
+    let mut device = create_device()?;
+    std::thread::sleep(Duration::from_millis(1500));
+    for character in "SENTINEL".chars() {
+        emit_character(&mut device, character)?;
+    }
+    emit_key(&mut device, 28)?;
+    for _ in 0..20 {
+        type_trigger(&mut device, ";undo")?;
+        emit_key(&mut device, 14)?;
+        std::thread::sleep(expansion_pause());
+        emit_key(&mut device, 28)?;
+    }
+    std::thread::sleep(Duration::from_millis(500));
+    emit_state_with_delay(&mut device, 29, 1, event_delay())?;
+    emit_key(&mut device, 30)?;
+    emit_key(&mut device, 46)?;
+    emit_state_with_delay(&mut device, 29, 0, event_delay())?;
+    std::thread::sleep(Duration::from_millis(500));
+    Ok(())
+}
+
 fn run_compatibility_cases(copy_result: bool) -> anyhow::Result<()> {
     let mut device = create_device()?;
     std::thread::sleep(Duration::from_millis(1500));
@@ -391,6 +413,19 @@ fn main() -> anyhow::Result<()> {
             .next()
             .ok_or_else(|| anyhow::anyhow!("missing probe trigger"))?;
         return run_probe_copy(&probe);
+    }
+    if trigger == "--undo-stress-copy" {
+        return run_undo_stress();
+    }
+    if trigger == "--copy-event-log" {
+        let mut device = create_device()?;
+        std::thread::sleep(Duration::from_millis(1500));
+        emit_key(&mut device, 66)?; // F8 arms fixture event-log copying.
+        emit_state_with_delay(&mut device, 29, 1, event_delay())?;
+        emit_key(&mut device, 46)?; // Ctrl+C
+        emit_state_with_delay(&mut device, 29, 0, event_delay())?;
+        std::thread::sleep(Duration::from_millis(500));
+        return Ok(());
     }
     if trigger == "--compatibility" {
         return run_compatibility_suite();

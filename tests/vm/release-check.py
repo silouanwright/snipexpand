@@ -91,7 +91,8 @@ def run(args):
     receipt = output / 'receipt.json'
     if summary.exists() or receipt.exists():
         raise ValueError('Evidence already exists; choose a fresh output directory')
-    env = {**os.environ, 'SNIPEXPAND_VM_CAMPAIGN': 'full', 'SNIPEXPAND_VM_TIMING': 'standard'}
+    env = {**os.environ, 'SNIPEXPAND_VM_CAMPAIGN': 'full', 'SNIPEXPAND_VM_TIMING': 'standard',
+           'SNIPEXPAND_VM_CAMPAIGN_REPEATS': '1'}
     command = [sys.executable, str(ROOT / 'tests/vm/run.py'), '--result-file', str(summary)]
     if args.image:
         command.extend(['--image', args.image])

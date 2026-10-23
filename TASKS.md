@@ -5,7 +5,11 @@ bottom unless user feedback provides a stronger signal.
 
 ## Graphical release gate and prepared image — 2026-10-23
 
-Status: implemented and validated locally. Compatibility commit `095baaa` is
+Status: implemented, validated, and pushed to GitHub main as `35461e3`.
+Its exact-commit `desktop-vm/full` success status was published on 2026-10-23
+with receipt SHA-256 `31983eefe6b51cc3f7f476cd1321b0fc1b1a96714704f9f4525e2a356e03ee7b`.
+The companion LookElsewhere test commit `8c45c23` is also pushed.
+Compatibility commit `095baaa` is
 integrated on `codex/integrated-release` as `5a0494a`; prior VM documentation and
 continuity were preserved in `5a5801b`. No production SnipExpand change was needed.
 
@@ -17,8 +21,8 @@ continuity were preserved in `5a5801b`. No production SnipExpand change was need
   hashes, and complete cleanup. An explicit `publish` posts the receipt hash to
   GitHub. The tag workflow requires the latest trusted `desktop-vm/full` status
   for that exact commit before either architecture build. CI runs the negative
-  gate tests. Nothing has been pushed or published in this batch; the remote
-  release gate takes effect after these workflow changes are pushed.
+  gate tests. The workflow and passing commit status are now on GitHub; no release tag
+  was created. Hosted CI passed: run `40010234934` (Rust, Python gate tests, Fcitx bridge).
 - Prepared and activated `desktop-20261023-v1`: original base hashes unchanged,
   two verified OS shutdowns, a reboot into kernel `7.2.8-9-omarchy`, standalone
   qcow2, pinned disk/firmware hashes. Apps: Firefox 158.0.1, Zed 1.25.2, Chromium
@@ -69,10 +73,51 @@ passed after the guest-only readiness fix. Both failures remain in the evidence.
 Shared runner code is tracked under `tests/vm/harness/` and deployed through
 `tests/vm/install-harness.py`, which backs up code and preserves local state.
 [Commands, limits, image refresh and release procedure](tests/vm/README.md).
-Remaining delivery: push the verified local commits when requested; publish a
-fresh receipt for the actual release commit before pushing its tag. No hosted VM
+Remaining delivery: publish a fresh receipt for any future release commit
+before pushing its tag. The verified automation commits are delivered. No hosted VM
 runner, timer, release, or host desktop changes were created. Broader feature and
 keyboard/layout coverage below remains separate future work.
+
+### Undo stress investigation and repeatable diagnostics
+
+The production undo defect remains **unresolved**. No daemon or injector change
+was justified by the new evidence. Keep the original failed artifacts referenced
+above; passing repeats do not establish that the intermittent defect is gone.
+
+Implemented focused `undo-stress` coverage (20 expansion/Backspace restorations
+per application, with an untouched sentinel), bounded 1–10 campaign repeats,
+separate results for every attempt, Firefox DOM event export, and effective
+keyboard/daemon debug logs. All use the existing guest guards. Release acceptance
+forces a single full standard run even if stress/repeat variables are inherited.
+
+Verified in `/home/silouan/Documents/ChatGPT/SnipExpand/verification/20261023-undo/`:
+
+- The unchanged production binary passed the traced baseline and all five
+  Firefox repeats. Four later Zed launches lost only their first ASCII line;
+  undo itself was correct. The repeated launcher reused editor state, so new
+  launches now have separate short profile directories.
+- A long cache/profile path made Zed fail to open. A short-path retry passed
+  all 80 focused undo cycles (40 per app), preserving each sentinel and all
+  restored triggers; `focused-short-profiles.json` and its guest archive retain
+  the evidence. This run used the earlier short cache-root implementation.
+  The final implementation changes only the fixture profile root and preserves
+  shared application caches; its exact-source validation is separate below.
+- Passed 149 Rust tests, formatting, Clippy, CLI help, and 20 Python tests.
+  Unit tests verify that later successes cannot hide an earlier repeat failure
+  and that release acceptance overrides focused/stress/repeat settings.
+
+Final delivery evidence belongs in `final-delivery.json`, with the clean-commit
+full-suite receipt under `release-proof/receipt.json` and original fast fixture
+repeats in `final-compatibility.json`. These external files record the exact
+commit, payload hashes, publication, CI, and completion without changing a tested
+commit to record its own hash. Their absence means that step has not completed.
+No release tag, production installation, or host desktop input is part of this work.
+
+Next diagnostic step if the original failure recurs: compare `input-events.json`
+with guest keyboard/daemon timestamps to locate whether corruption precedes undo
+or occurs while deleting/restoring text. The tests still wait 250 ms around
+operations; simultaneous new physical typing during injection remains outside
+this coverage. Do not describe the profile fix as a production undo fix.
 
 ## Firefox/Zed guest compatibility — 2026-10-23
 

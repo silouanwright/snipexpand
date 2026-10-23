@@ -41,6 +41,34 @@ class SuiteTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 suite.timing()
 
+    def test_repeat_campaign_keeps_failed_attempts(self):
+        calls = []
+        def logged(name, *args, **kwargs):
+            calls.append(name)
+            return b'{"application":"test","passed":false}' if name == 'firefox' else b'{"application":"test","passed":true}'
+        with tempfile.TemporaryDirectory() as directory:
+            h = SimpleNamespace(out=Path(directory), checks=[], logged=logged)
+            with patch.dict(suite.os.environ, {'SNIPEXPAND_VM_CAMPAIGN_REPEATS': '2'}):
+                with self.assertRaises(RuntimeError):
+                    suite.campaign(h)
+            self.assertEqual([c['name'] for c in h.checks], ['firefox', 'zed', 'firefox-2', 'zed-2'])
+            self.assertFalse(h.checks[0]['passed'])
+            self.assertTrue(h.checks[2]['passed'])
+            self.assertTrue((h.out / 'firefox-result.json').exists())
+            self.assertTrue((h.out / 'firefox-2-result.json').exists())
+
+    def test_undo_stress_routes_to_the_focused_fixture(self):
+        with patch.dict(suite.os.environ, {'SNIPEXPAND_VM_CAMPAIGN': 'undo-stress'}), \
+             patch.object(suite, 'campaign') as campaign:
+            suite.run(None)
+            campaign.assert_called_once_with(None, fixture='undo')
+
+    def test_campaign_repeats_are_bounded(self):
+        for value in ('0', '11', 'bad'):
+            with patch.dict(suite.os.environ, {'SNIPEXPAND_VM_CAMPAIGN_REPEATS': value}):
+                with self.assertRaises(ValueError):
+                    suite.campaign_repeats()
+
     def test_unknown_selection_does_not_silently_run_core(self):
         with patch.dict(suite.os.environ, {'SNIPEXPAND_VM_CAMPAIGN': 'typo'}):
             with self.assertRaises(ValueError):

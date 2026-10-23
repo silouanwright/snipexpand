@@ -11,6 +11,27 @@
 <textarea autofocus spellcheck="false" aria-label="Compatibility test input"></textarea>
 <script>
   const target = document.querySelector("textarea")
+  // Synthetic fixture diagnostics only: F8 arms the next copy to export events.
+  const events = []
+  let copyEvents = false
+  for (const type of ["keydown", "keyup", "beforeinput", "input"]) {
+    target.addEventListener(type, event => {
+      if (events.length < 5000) events.push({type, time: Date.now(),
+        key: event.key, code: event.code, inputType: event.inputType, data: event.data,
+        value: target.value, start: target.selectionStart, end: target.selectionEnd})
+      if (type === "keydown" && event.key === "F8") {
+        event.preventDefault()
+        copyEvents = true
+      }
+    })
+  }
+  target.addEventListener("copy", event => {
+    if (copyEvents) {
+      event.preventDefault()
+      event.clipboardData.setData("text/plain", JSON.stringify(events))
+      copyEvents = false
+    }
+  })
   addEventListener("load", () => target.focus())
   addEventListener("focus", () => target.focus())
 </script>

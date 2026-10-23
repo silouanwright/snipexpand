@@ -3,7 +3,7 @@ set -euo pipefail
 
 repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 target=${1:-}
-cache_root=${XDG_CACHE_HOME:-$HOME/.cache}/snipexpand/compatibility
+cache_root=${SNIPEXPAND_COMPATIBILITY_ROOT:-${XDG_CACHE_HOME:-$HOME/.cache}/snipexpand/compatibility}
 
 require() {
   command -v "$1" >/dev/null || {

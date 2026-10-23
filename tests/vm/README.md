@@ -153,3 +153,39 @@ and 250 ms pauses for deliberate stress testing. The October 23 repeat exposed
 an intermittent Firefox undo-boundary mismatch at that rate, after the separate
 Zed driver-settling correction. No daemon fix is claimed. Stress mode remains
 available and its failures are retained; it cannot produce a release receipt.
+
+### Repeated and focused stress diagnostics
+
+Run three independent Firefox/Zed fixtures at the original fast timing:
+
+```bash
+SNIPEXPAND_VM_CAMPAIGN=firefox-zed SNIPEXPAND_VM_TIMING=stress \
+  SNIPEXPAND_VM_CAMPAIGN_REPEATS=3 python3 tests/vm/run.py
+```
+
+Each application launch uses a fresh browser/editor profile in a short guest
+temporary directory. Only the fixture profile root changes; shared application
+caches such as GPU shaders keep their existing location. Repeats are bounded
+at 1–10 per application; every attempt has separate logs and results. A later
+pass never replaces an earlier failure. Release acceptance forces one standard
+full-suite pass regardless of these environment variables.
+
+To exercise 20 consecutive expansion/Backspace-undo cycles per application:
+
+```bash
+SNIPEXPAND_VM_CAMPAIGN=undo-stress python3 tests/vm/run.py
+```
+
+This focused fixture always uses 15 ms transitions and 250 ms pauses. It checks
+an untouched sentinel line and every restored trigger, followed by the existing
+reload checks. `SNIPEXPAND_VM_CAMPAIGN_REPEATS` also applies here. These checks
+exercise settled undo at fast typing speed; they do not cover typing new keys
+while undo injection is still in progress.
+
+Firefox exports a bounded `input-events.json` from the synthetic textarea after
+the byte comparison. It records DOM key/input events, timestamps, selection, and
+fixture text. F8 arms a test-only copy handler; the guest driver copies that log
+before the reload probes. Daemon logs enable the specific keyboard and daemon
+debug modules, since a general `RUST_LOG=snipexpand=debug` is overridden by the
+current daemon's default filter. These diagnostics contain synthetic guest input
+only and never observe the host desktop.

@@ -28,23 +28,33 @@ def timing():
     return (90, 500) if profile == 'standard' else (15, 250)
 
 
-def campaign(h):
+def campaign_repeats():
+    count = int(os.environ.get('SNIPEXPAND_VM_CAMPAIGN_REPEATS', '1'))
+    if not 1 <= count <= 10:
+        raise ValueError('SNIPEXPAND_VM_CAMPAIGN_REPEATS must be between 1 and 10')
+    return count
+
+
+def campaign(h, fixture='compatibility'):
+    repeats = campaign_repeats()
     h.logged('packages', 'python3 ~/snipexpand/tests/vm/guest-packages.py', timeout=780)
     h.logged('install', 'python3 ~/guest-setup.py')
-    event_delay, pause = timing()
+    event_delay, pause = (15, 250) if fixture == 'undo' else timing()
     results = []
-    for app in ('firefox', 'zed'):
+    for index in range(repeats * 2):
+        app = ('firefox', 'zed')[index % 2]
+        label = app if index < 2 else f'{app}-{index // 2 + 1}'
         try:
-            output = h.logged(app, f'python3 ~/snipexpand/tests/vm/guest-campaign.py {app} --event-delay {event_delay} --pause {pause}', timeout=300)
+            output = h.logged(label, f'python3 ~/snipexpand/tests/vm/guest-campaign.py {app} --event-delay {event_delay} --pause {pause} --fixture {fixture}', timeout=300)
             result = application_result(output.decode())
         except Exception as error:
             try:
-                result = application_result((h.out / (app + '.log')).read_text())
+                result = application_result((h.out / (label + '.log')).read_text())
             except (OSError, ValueError, IndexError):
                 result = {'passed': False, 'error': str(error)}
-        (h.out / f'{app}-result.json').write_text(json.dumps(result, indent=2) + '\n')
+        (h.out / f'{label}-result.json').write_text(json.dumps(result, indent=2) + '\n')
         # Finish independent application coverage even when another application fails.
-        results.append((app, result))
+        results.append((label, result))
     for app, result in results:
         h.checks.append({'name': app, **result})
     (h.out / 'checks.json').write_text(json.dumps(h.checks, indent=2) + '\n')
@@ -54,8 +64,10 @@ def campaign(h):
 
 def run(h):
     selection = os.environ.get('SNIPEXPAND_VM_CAMPAIGN', 'full')
-    if selection not in ('full', 'core', 'firefox-zed'):
+    if selection not in ('full', 'core', 'firefox-zed', 'undo-stress'):
         raise ValueError('Unknown SNIPEXPAND_VM_CAMPAIGN: ' + selection)
+    if selection == 'undo-stress':
+        return campaign(h, fixture='undo')
     if selection == 'firefox-zed':
         return campaign(h)
     h.logged('packages', 'python3 ~/snipexpand/tests/vm/guest-packages.py', timeout=60)

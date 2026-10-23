@@ -10,6 +10,7 @@ import signal
 import shutil
 import stat
 import subprocess as sp
+import tempfile
 import time
 
 
@@ -51,6 +52,7 @@ def main():
     parser.add_argument('--repo', type=Path, default=Path.home() / 'snipexpand')
     parser.add_argument('--event-delay', type=int, default=15)
     parser.add_argument('--pause', type=int, default=250)
+    parser.add_argument('--fixture', choices=['compatibility', 'undo'], default='compatibility')
     args = parser.parse_args()
     require_guest()  # Must precede all desktop, service, clipboard, and input operations.
     session_environment()
@@ -79,17 +81,20 @@ def main():
 
     config = out / 'config'
     shutil.copytree(repo / 'tests/compatibility/config', config)
+    cache = Path(tempfile.mkdtemp(prefix='sx-vm-'))
+    (out / 'profile-cache.txt').write_text(str(cache) + '\n')
     daemon = app = driver = None
     target = None
     result = {'application': args.application, 'passed': False,
-              'event_delay_ms': args.event_delay, 'expansion_pause_ms': args.pause}
+              'event_delay_ms': args.event_delay, 'expansion_pause_ms': args.pause,
+              'fixture': args.fixture}
     try:
         # Refuse a second daemon instead of manipulating an unrelated user service.
         if sp.run(['pgrep', '-x', 'snipexpand'], stdout=sp.DEVNULL).returncode == 0:
             raise RuntimeError('A SnipExpand daemon is already running in the guest')
         known = {w['address'] for w in state('clients')}
         env = os.environ.copy()
-        env.update(XDG_CONFIG_HOME=str(config), RUST_LOG='snipexpand=debug',
+        env.update(XDG_CONFIG_HOME=str(config), RUST_LOG='snipexpand::daemon=debug,snipexpand::keyboard=debug',
                    SNIPEXPAND_E2E_EVENT_DELAY_MS=str(args.event_delay),
                    SNIPEXPAND_E2E_EXPANSION_PAUSE_MS=str(args.pause))
         with (out / 'daemon.log').open('wb') as dlog, (out / 'application.log').open('wb') as alog:
@@ -98,6 +103,8 @@ def main():
             if daemon.poll() is not None:
                 raise RuntimeError('Guest daemon exited during startup')
             app_env = os.environ.copy()
+            # Every launch gets new editor state and browser storage, including repeats.
+            app_env['SNIPEXPAND_COMPATIBILITY_ROOT'] = str(cache)
             if args.application == 'zed':
                 # Synthetic file, disposable profile; leave the host Zed settings alone.
                 app_env.update(SNIPEXPAND_VM_FIXTURE='1', ZED_ALLOW_EMULATED_GPU='1')
@@ -123,7 +130,7 @@ def main():
             capture('before')
             sp.run(['wl-copy', '--clear'], check=True, timeout=5)
             driver = sp.Popen([str(repo / 'target/debug/examples/e2e_type'),
-                               '--compatibility-copy'],
+                               '--undo-stress-copy' if args.fixture == 'undo' else '--compatibility-copy'],
                               env=env, stdout=alog, stderr=sp.STDOUT, start_new_session=True)
             deadline = time.monotonic() + 180
             while driver.poll() is None:
@@ -138,7 +145,7 @@ def main():
             if state('activewindow').get('address') != target['address']:
                 raise RuntimeError('Guest focus changed before capture')
             actual = sp.check_output(['wl-paste', '--no-newline'], timeout=5)
-            expected = expected[:-1]
+            expected = (b'SENTINEL\n' + b';undo \n' * 20) if args.fixture == 'undo' else expected[:-1]
             (out / 'actual.txt').write_bytes(actual)
             (out / 'expected.txt').write_bytes(expected)
             result.update(passed=actual == expected, bytes=len(actual),
@@ -149,6 +156,13 @@ def main():
                 result['fixture_error'] = 'Output differs from expected.txt'
             capture('fixture')
             result['fixture_passed'] = actual == expected
+            if args.application == 'firefox':
+                # Export DOM input ordering after the ordinary byte comparison.
+                sp.run([str(repo / 'target/debug/examples/e2e_type'), '--copy-event-log'],
+                       env=env, check=True, timeout=15, stdout=alog, stderr=sp.STDOUT)
+                trace = sp.check_output(['wl-paste', '--no-newline'], timeout=5)
+                json.loads(trace)  # Refuse an empty or stale clipboard capture.
+                (out / 'input-events.json').write_bytes(trace)
             result['reload'] = []
             reload_file = config / 'snipexpand/match/reload.yml'
             original_pid = daemon.pid
@@ -203,7 +217,7 @@ def main():
                     os.killpg(process.pid, signal.SIGKILL)
                     process.wait(timeout=5)
         if args.application == 'zed':
-            profile = Path.home() / '.cache/snipexpand/compatibility/zed-profile'
+            profile = cache / 'zed-profile'
             if (profile / 'config/settings.json').is_file():
                 shutil.copy2(profile / 'config/settings.json', out / 'zed-settings.json')
             if (profile / 'logs').is_dir():
