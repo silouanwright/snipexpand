@@ -134,3 +134,9 @@ synthetic files in its disposable profile. Its `--user-data-dir` settings are at
 Firefox has its own clean profile. Guest Stay Awake prevents idle locking, and
 Firefox/Zed input guards explicitly reject a locked session even when Hyprland
 still reports the previous active window.
+
+The compatibility driver waits the configured expansion pause (250 ms in the
+VM fixture) after Backspace undo before sending Enter. Undo itself remains the
+first key after expansion. This checks settled undo output; it does not establish
+correctness when new physical keys arrive during undo injection. The original
+no-wait Zed mismatch is retained in the October 23 evidence and backlog.

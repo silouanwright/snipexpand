@@ -316,6 +316,10 @@ fn run_compatibility_cases(copy_result: bool) -> anyhow::Result<()> {
 
     type_trigger(&mut device, ";undo")?;
     emit_key(&mut device, 14)?; // Backspace restores the original trigger.
+
+    // Undo injects text asynchronously, just like an expansion. Let it settle
+    // before the next physical key can interleave with the restored trigger.
+    std::thread::sleep(expansion_pause());
     emit_key(&mut device, 28)?; // Enter
 
     for _ in 0..20 {

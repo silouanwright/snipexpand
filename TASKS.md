@@ -36,10 +36,18 @@ continuity were preserved in `5a5801b`. No production SnipExpand change was need
 Evidence: `/home/silouan/Documents/ChatGPT/SnipExpand/verification/20261023-automation/`.
 `image-accepted.json` identifies the passing runs for both projects;
 `validation.log` records unit checks. The final clean-commit proof belongs in
-`release-proof/receipt.json`, produced after this documentation checkpoint by
+`release-proof-final/receipt.json`, produced after this documentation checkpoint by
 `release-check.py`; its `commit` must match HEAD before any publication. An absent
 receipt means that final step has not completed. This external receipt avoids
 changing a tested commit merely to write its own hash into this task record.
+
+The first clean-commit gate correctly refused a receipt: Zed produced the right
+byte count but corrupted the undo/newline boundary. The driver sent Enter 15 ms
+after Backspace release, without the settling pause used after other expansions.
+The fixture now waits the same configured 250 ms after undo before the next key;
+production code is unchanged. Preserve `release-proof/summary.json` and its guest
+archive as the failed result. Rapid physical typing during undo is still an open
+stress-coverage/product-behavior question, not claimed fixed by this fixture change.
 
 The first preparation attempt installed packages but treated the SSH disconnect
 on poweroff as an error. Preparation now acknowledges a delayed guest OS shutdown
