@@ -1,5 +1,5 @@
 use anyhow::Result;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 use tokio::io::AsyncWriteExt;
 use tokio::signal::unix::{signal, SignalKind};
@@ -7,7 +7,7 @@ use tokio::signal::unix::{signal, SignalKind};
 use crate::config::{Config, FcitxSensitiveHint, NonBmpInput};
 use crate::expander::Expander;
 use crate::fcitx5::DirectCommitResult;
-use crate::injector::{ComposeTiming, Injector, InjectorOptions};
+use crate::injector::{ComposeTiming, Injector, InjectorOptions, KeymapLookup};
 use crate::ipc::{IpcCmd, IpcServer};
 use crate::keyboard::{KeyboardEvent, KeyboardStream};
 
@@ -46,6 +46,111 @@ const RESET_KEYS: &[u16] = &[
     104, // KEY_PAGEUP
     109, // KEY_PAGEDOWN
 ];
+
+fn normalize_keyboard_name(name: &str) -> String {
+    name.chars()
+        .filter(|character| character.is_ascii_alphanumeric())
+        .flat_map(char::to_lowercase)
+        .collect()
+}
+
+fn query_hyprland_layouts(keymap: &KeymapLookup) -> HashMap<String, u32> {
+    let output = std::process::Command::new("hyprctl")
+        .args(["devices", "-j"])
+        .output();
+    let Ok(output) = output else {
+        return HashMap::new();
+    };
+    if !output.status.success() {
+        return HashMap::new();
+    }
+    let Ok(value) = serde_json::from_slice::<serde_json::Value>(&output.stdout) else {
+        return HashMap::new();
+    };
+    let mut layouts = HashMap::new();
+    if let Some(keyboards) = value.get("keyboards").and_then(|value| value.as_array()) {
+        for keyboard in keyboards {
+            let Some(name) = keyboard.get("name").and_then(|value| value.as_str()) else {
+                continue;
+            };
+            if name.starts_with("hl-virtual-keyboard-") {
+                continue;
+            }
+            let Some(active) = keyboard
+                .get("active_keymap")
+                .and_then(|value| value.as_str())
+            else {
+                continue;
+            };
+            if let Some(index) = keymap.layout_index_by_name(active) {
+                layouts.insert(normalize_keyboard_name(name), index);
+            }
+        }
+    }
+    tracing::info!(count = layouts.len(), "Loaded active layouts from Hyprland");
+    layouts
+}
+
+fn spawn_hyprland_layout_listener(
+    layouts: Arc<Mutex<HashMap<String, u32>>>,
+    changed: tokio::sync::mpsc::UnboundedSender<()>,
+    keymap: KeymapLookup,
+) {
+    std::thread::spawn(move || {
+        use std::io::BufRead;
+        loop {
+            let socket = match (
+                std::env::var("XDG_RUNTIME_DIR"),
+                std::env::var("HYPRLAND_INSTANCE_SIGNATURE"),
+            ) {
+                (Ok(runtime), Ok(signature)) => std::path::PathBuf::from(runtime)
+                    .join("hypr")
+                    .join(signature)
+                    .join(".socket2.sock"),
+                _ => {
+                    tracing::warn!("Hyprland IPC environment is unavailable for layout tracking");
+                    return;
+                }
+            };
+            let stream = match std::os::unix::net::UnixStream::connect(&socket) {
+                Ok(stream) => stream,
+                Err(error) => {
+                    tracing::warn!(%error, "Could not connect to Hyprland layout events");
+                    std::thread::sleep(std::time::Duration::from_secs(2));
+                    continue;
+                }
+            };
+            for line in std::io::BufReader::new(stream).lines() {
+                let Ok(line) = line else { break };
+                let Some(payload) = line.strip_prefix("activelayout>>") else {
+                    continue;
+                };
+                let Some((keyboard, name)) = payload.split_once(',') else {
+                    continue;
+                };
+                if keyboard.starts_with("hl-virtual-keyboard-") {
+                    continue;
+                }
+                let Some(index) = keymap.layout_index_by_name(name) else {
+                    tracing::debug!(keyboard, layout = name, "Hyprland layout is not in XKB map");
+                    continue;
+                };
+                layouts
+                    .lock()
+                    .unwrap()
+                    .insert(normalize_keyboard_name(keyboard), index);
+                let _ = changed.send(());
+                tracing::debug!(
+                    keyboard,
+                    layout = name,
+                    index,
+                    "Active keyboard layout changed"
+                );
+            }
+            std::thread::sleep(std::time::Duration::from_millis(250));
+        }
+    });
+}
 
 struct Undo {
     replacement_len: usize,
@@ -129,6 +234,16 @@ pub async fn run(config: Config) -> Result<()> {
         wayland_text_chars: wayland_text_characters(&config),
     })?;
     tracing::info!("Injection keyboard ready");
+
+    // Hyprland's evdev stream contains physical keycodes, not translated text.
+    // Keep each physical keyboard's active XKB group in sync with Hyprland IPC.
+    let keyboard_layouts = Arc::new(Mutex::new(query_hyprland_layouts(injector.keymap())));
+    let (layout_tx, mut layout_rx) = tokio::sync::mpsc::unbounded_channel::<()>();
+    spawn_hyprland_layout_listener(
+        Arc::clone(&keyboard_layouts),
+        layout_tx,
+        injector.keymap().clone(),
+    );
 
     // Open evdev keyboard stream
     let mut kb_stream = KeyboardStream::new().await?;
@@ -247,7 +362,13 @@ pub async fn run(config: Config) -> Result<()> {
                             }
                             _ if ev.value == 1 => {
                                 // Key press only. Repeat events flood the buffer.
-                                handle_key_event(&ev, &mut expander, &injector, &mut input);
+                                let layout = keyboard_layouts
+                                    .lock()
+                                    .unwrap()
+                                    .get(&normalize_keyboard_name(&ev.name))
+                                    .copied()
+                                    .unwrap_or(0);
+                                handle_key_event(&ev, &mut expander, &injector, &mut input, layout);
                             }
                             _ => {}
                         }
@@ -261,6 +382,10 @@ pub async fn run(config: Config) -> Result<()> {
                         break;
                     }
                 }
+            }
+
+            Some(_) = layout_rx.recv() => {
+                cancel_input_context(&mut expander, &mut input);
             }
 
             Some(_) = watch_rx.recv() => {
@@ -385,6 +510,7 @@ fn handle_key_event(
     expander: &mut Expander,
     injector: &Injector,
     input: &mut InputState,
+    layout: u32,
 ) {
     if input.shortcut_held() {
         cancel_input_context(expander, input);
@@ -416,11 +542,12 @@ fn handle_key_event(
     }
 
     // Use the actual XKB keymap to decode the keypress for any keyboard layout.
-    if let Some(ch) =
-        injector
-            .keymap()
-            .decode(ev.code as u32, input.shift_held(), input.altgr_held())
-    {
+    if let Some(ch) = injector.keymap().decode(
+        ev.code as u32,
+        input.shift_held(),
+        input.altgr_held(),
+        layout,
+    ) {
         input.undo = None;
         input.pending_undo = None;
         tracing::debug!(
@@ -939,6 +1066,14 @@ fn log_config_warnings(config: &Config) {
 mod tests {
     use super::*;
     use crate::config::TriggerMode;
+
+    #[test]
+    fn hyprland_and_evdev_keyboard_names_normalize_equally() {
+        assert_eq!(
+            normalize_keyboard_name("at-translated-set-2-keyboard"),
+            normalize_keyboard_name("AT Translated Set 2 keyboard")
+        );
+    }
 
     fn expander(trigger: &str) -> Expander {
         Expander::new(

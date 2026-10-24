@@ -39,8 +39,9 @@ pub struct KeyInfo {
 #[derive(Clone)]
 pub struct KeymapLookup {
     table: HashMap<char, KeyInfo>,
-    /// Reverse lookup: (evdev_code, xkb_level) → char, for decoding physical keypresses.
-    input_table: HashMap<(u32, u32), char>,
+    /// Reverse lookup: (evdev_code, xkb_level, layout) → char.
+    input_table: HashMap<(u32, u32, u32), char>,
+    layout_names: Vec<String>,
 }
 
 struct KeymapData {
@@ -62,6 +63,7 @@ impl KeymapLookup {
             return Self {
                 table: HashMap::new(),
                 input_table: HashMap::new(),
+                layout_names: Vec::new(),
             };
         };
         Self::build_from_xkb(&keymap)
@@ -83,6 +85,7 @@ impl KeymapLookup {
                 lookup: Self {
                     table: HashMap::new(),
                     input_table: HashMap::new(),
+                    layout_names: Vec::new(),
                 },
                 text: String::new(),
             }
@@ -91,30 +94,38 @@ impl KeymapLookup {
 
     fn build_from_xkb(keymap: &xkb::Keymap) -> Self {
         let mut table: HashMap<char, KeyInfo> = HashMap::new();
-        let mut input_table: HashMap<(u32, u32), char> = HashMap::new();
+        let mut input_table: HashMap<(u32, u32, u32), char> = HashMap::new();
+        let layout_names = (0..keymap.num_layouts())
+            .map(|layout| keymap.layout_get_name(layout).to_string())
+            .collect();
         keymap.key_for_each(|km, kc| {
             let xkb_code = kc.raw();
             if xkb_code < 8 {
                 return;
             }
             let evdev_code = xkb_code - 8;
-            // Only build the injection table from layout 0 (the active layout).
-            // Iterating all layouts causes collisions: e.g. on QWERTZ Czech + English,
-            // 'y' from the English layout gets stored with the evdev_code of the Czech 'z'
-            // key, so injecting 'y' produces 'z' in the compositor. Layout 0 is authoritative.
-            let layout = 0;
-            let num_levels = km.num_levels_for_key(kc, layout);
-            for level in 0..num_levels {
-                for sym in km.key_get_syms_by_level(kc, layout, level) {
-                    if let Some(ch) = keysym_to_char(*sym) {
-                        table.entry(ch).or_insert(KeyInfo { evdev_code, level });
-                        // Also record (evdev_code, level) → char for input decoding.
-                        input_table.entry((evdev_code, level)).or_insert(ch);
+            for layout in 0..km.num_layouts_for_key(kc) {
+                let num_levels = km.num_levels_for_key(kc, layout);
+                for level in 0..num_levels {
+                    for sym in km.key_get_syms_by_level(kc, layout, level) {
+                        if let Some(ch) = keysym_to_char(*sym) {
+                            // Keep layout zero for text injection; Hyprland's virtual
+                            // keyboard has its own active group. Input decoding below
+                            // tracks each physical keyboard's active group separately.
+                            if layout == 0 {
+                                table.entry(ch).or_insert(KeyInfo { evdev_code, level });
+                            }
+                            input_table.entry((evdev_code, level, layout)).or_insert(ch);
+                        }
                     }
                 }
             }
         });
-        Self { table, input_table }
+        Self {
+            table,
+            input_table,
+            layout_names,
+        }
     }
 
     pub fn lookup(&self, ch: char) -> Option<&KeyInfo> {
@@ -123,14 +134,24 @@ impl KeymapLookup {
 
     /// Decode a physical keypress to a char using the actual XKB keymap.
     /// `shift` = left/right Shift held; `altgr` = AltGr (right Alt) held.
-    pub fn decode(&self, evdev_code: u32, shift: bool, altgr: bool) -> Option<char> {
+    pub fn decode(&self, evdev_code: u32, shift: bool, altgr: bool, layout: u32) -> Option<char> {
         let level: u32 = match (shift, altgr) {
             (false, false) => 0,
             (true, false) => 1,
             (false, true) => 2,
             (true, true) => 3,
         };
-        self.input_table.get(&(evdev_code, level)).copied()
+        self.input_table
+            .get(&(evdev_code, level, layout))
+            .or_else(|| self.input_table.get(&(evdev_code, level, 0)))
+            .copied()
+    }
+
+    pub fn layout_index_by_name(&self, name: &str) -> Option<u32> {
+        self.layout_names
+            .iter()
+            .position(|candidate| candidate.eq_ignore_ascii_case(name))
+            .map(|index| index as u32)
     }
 }
 
@@ -1656,6 +1677,29 @@ mod tests {
     }
 
     #[test]
+    fn physical_key_decoding_uses_the_selected_xkb_layout() {
+        let ctx = xkb::Context::new(xkb::CONTEXT_NO_FLAGS);
+        let keymap = xkb::Keymap::new_from_names(
+            &ctx,
+            "",
+            "",
+            "us,ru",
+            "",
+            None,
+            xkb::KEYMAP_COMPILE_NO_FLAGS,
+        )
+        .expect("US and Russian layouts should compile");
+        let lookup = KeymapLookup::build_from_xkb(&keymap);
+        let russian = lookup
+            .layout_index_by_name("Russian")
+            .expect("keymap should expose the Russian layout name");
+
+        // Linux KEY_SEMICOLON is evdev code 39: ';' in US and 'ж' in Russian.
+        assert_eq!(lookup.decode(39, false, false, 0), Some(';'));
+        assert_eq!(lookup.decode(39, false, false, russian), Some('ж'));
+    }
+
+    #[test]
     fn wayland_keymap_reader_ignores_the_inherited_fd_offset() {
         let mut file = tempfile::tempfile().unwrap();
         file.write_all(b"test keymap\0").unwrap();
@@ -1731,6 +1775,7 @@ mod tests {
                 ),
             ]),
             input_table: HashMap::new(),
+            layout_names: Vec::new(),
         };
         assert_eq!(
             resolve_unicode_compose(&keymap, '🧐').unwrap(),
@@ -1792,6 +1837,7 @@ mod tests {
                 },
             )]),
             input_table: HashMap::new(),
+            layout_names: Vec::new(),
         };
         let error = resolve_unicode_compose(&keymap, '🙂').unwrap_err();
         assert!(error.to_string().contains("compose key '1'"));

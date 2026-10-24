@@ -7,6 +7,7 @@ use evdev::{Device, EventType, KeyCode};
 #[derive(Debug, Clone)]
 pub struct KeyEvent {
     pub device: PathBuf,
+    pub name: String,
     pub code: u16,  // Linux evdev keycode
     pub value: i32, // 0=release, 1=press, 2=repeat
 }
@@ -131,6 +132,7 @@ fn read_device_loop(
     path: &std::path::Path,
     tx: &tokio::sync::mpsc::UnboundedSender<KeyboardEvent>,
 ) -> anyhow::Result<()> {
+    let device_name = device.name().unwrap_or_default().to_string();
     loop {
         for event in device.fetch_events()? {
             if event.event_type() == evdev::EventType::KEY {
@@ -138,6 +140,7 @@ fn read_device_loop(
                 if tx
                     .send(KeyboardEvent::Key(KeyEvent {
                         device: path.to_path_buf(),
+                        name: device_name.clone(),
                         code: event.code(),
                         value: event.value(),
                     }))

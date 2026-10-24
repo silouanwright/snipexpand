@@ -16,6 +16,7 @@ Fast, config-based text expansion for Linux and Wayland. **First-class support f
 
 - System-wide, clipboard-free expansion
 - Immediate or terminator-based expansion
+- Active per-keyboard XKB layout tracking on Hyprland
 - Plain text and multiline replacements
 - Cursor placement with `$|$`
 - Recursive YAML configuration with automatic reload
